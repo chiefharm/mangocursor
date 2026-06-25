@@ -1,0 +1,20 @@
+---
+description: Контекст проекта MangoCursor — салон, Mango, Telegram, VPS
+alwaysApply: true
+---
+
+# MangoCursor — правило для AI
+
+Перед любой задачей в этом репозитории **прочитай `PROJECT_MEMORY.md`** в корне проекта.
+
+## Кратко
+
+- Салон красоты «Сока», речевая аналитика Mango Office
+- Цель: автоотбор проблемных звонков → расшифровка + комментарий → Telegram
+- **Формат для iPhone: DOCX** (не TXT/HTML в Telegram)
+- Главный скрипт на сервере: `daily_pipeline.py`
+- Секреты в `.env`, не коммитить
+- GitHub: `chiefharm/mangocursor`, VPS: `72.56.249.113`, путь `/opt/mango-pipeline`
+- Входные данные: HTML-расшифровки из Mango (ручной экспорт → git или `incoming/`)
+
+При изменениях пайплайна обновляй `PROJECT_MEMORY.md`.
