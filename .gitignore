@@ -7,3 +7,8 @@ venv/
 .idea/
 .vscode/
 *.log
+data/
+telegram_exports/
+telegram_exports_html/
+telegram_docx/
+incoming/
