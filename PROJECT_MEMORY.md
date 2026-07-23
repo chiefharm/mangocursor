@@ -1,61 +1,147 @@
-# MangoCursor — база знаний проекта
+# MangoCursor — база знаний проекта (память для AI)
 
-> **Для AI:** в начале любой новой сессии по этому проекту прочитай этот файл целиком.
-
-## Цель проекта
-
-Автоматизировать контроль качества звонков **салона красоты «Сока»** (Mango Office, речевая аналитика).
-
-**Задача:** находить «плохие» и важные для разбора звонки, формировать расшифровку с коротким комментарием о проблеме и отправлять владельцу в **Telegram** — чтобы работало **без включённого ПК** (через VPS).
+> **Для AI:** в начале **любой** новой сессии по этому проекту прочитай этот файл **целиком**, затем `SESSION_LOG.md`.  
+> Копия на VPS: `/opt/mango-pipeline/PROJECT_MEMORY.md`
 
 ---
 
-## Что считаем «плохим» / важным звонком
+## Цель
 
-| Категория | Маркеры |
-|-----------|---------|
-| Недовольство клиента | недовол, жалоб, претенз, извин |
-| Отказ в услуге | не делаем, отказ |
-| Техсбой записи | ошибка, невозможно записаться, техподдержка |
-| Цена без записи | сколько стоит → ушёл без записи |
-| Не закрыт в запись | перезвоню, подумаю, не смогу |
-| Перенос/отмена | отменить, перенести, перезаписаться |
-| Неудобное время | не устраивает, позднее время |
-| Новый клиент | первый раз |
+Автоматизировать **контроль качества звонков** сети салонов **«SOCO / Сока»** (Mango Office).
+
+**Задача владельца (Егор, Telegram `@owner`, ID `YOUR_TELEGRAM_CHAT_ID`):**
+1. Каждый день забирать звонки из Mango (два аккаунта: Москва + Красноярск)
+2. Расшифровывать (Yandex SpeechKit)
+3. **Отправлять в Telegram только косячные** + сомнительные
+4. Хорошие звонки **не присылать**
+5. Работать **без ПК** (VPS Amsterdam)
 
 ---
 
-## Формат данных
+## Два салона (multi-site)
 
-- **Вход:** HTML-расшифровки из Mango Office (имя вида `2026-04-10__17-47-57__79XXXXXXXXX__админ1.html`)
-- **Агрегированный CSV** (`2026-04-29_13-51-08.csv`) — только сводка по дням, **без** полных расшифровок; колонка «Жалобы и претензии (AI)» > 0% — критерий для отчёта, но не для per-call отправки
-- **Выход в Telegram:** **DOCX** (лучше всего открывается на iPhone). TXT и HTML в Telegram на iOS часто показываются пустыми
+| site_id | Подпись в сообщениях | ЛС Mango | Часовой пояс |
+|---------|----------------------|----------|--------------|
+| `moscow` | расшифровка звонков SOCO Москва | **16958477** | Europe/Moscow |
+| `krasnoyarsk` | расшифровка звонков SOCO Красноярск | **16719904** | Asia/Krasnoyarsk |
+
+Конфиг: `site_config.py`, переменные `MANGO_SITES=moscow,krasnoyarsk`, `SITE_*` в `.env`.  
+Ключи API **только в `.env` на VPS**, не в git и не в этот файл.
+
+### Красноярск — один номер, добавочные (филиалы)
+
+Городской **(391) 269-90-73**. В API: `line_number=73912699073`, филиал = `to_extension`.
+
+| Доб. | Точка | Учитывать |
+|------|-------|-----------|
+| **05** | Новосибирская | да |
+| **12** | Дубровинского | да |
+| **25** | Весны | да |
+| **97** | Горького | **нет** (филиал закрыт) |
+| **269-90-78**, доб. 14/105/112/197 | «Потерянные» | **нет** |
+
+Логика: `site_lines.py` → `is_tracked_call()`, `branch_label()`.
+
+---
+
+## Telegram — маршрутизация (актуально 04.07.2026)
+
+Бот: **chiefharmcursor** (`TELEGRAM_BOT_TOKEN` в `.env`).
+
+| site | Личка Егора | Группа |
+|------|-------------|--------|
+| **moscow** | `YOUR_TELEGRAM_CHAT_ID` | **«звонки Москва Фили»** `YOUR_MOSCOW_GROUP_ID` |
+| **krasnoyarsk** | `YOUR_TELEGRAM_CHAT_ID` | **«Звонки soco красноярsk»** `YOUR_KRASNOYARSK_GROUP_ID` |
+
+- Каждый город → **своя** группа + **личка** (оба получают копию своего города).
+- **`TELEGRAM_EXTRA_CHAT_IDS` не использовать** — иначе группы смешиваются.
+- Функция: `telegram_notify.site_chat_ids(site)`.
+- Отправка **только с VPS** (Telegram заблокирован с ПК в РФ).
+
+**Не путать:** `@hermes_cursor_agent_bot` — отдельный Hermes/cursor-tg бот.
+
+---
+
+## Что отправлять / не отправлять
+
+### Отправлять (`verdict: bad` / `uncertain`)
+
+См. `call_qc.py` → `assess_call()` → `should_send`.
+
+### НЕ отправлять (`verdict: good`)
+
+Запись подтверждена, перенос согласован, сервисный звонок без проблем.
+
+---
+
+## Формат Telegram (`telegram_format.py`)
+
+```
+расшифровка звонков SOCO Красноярск
+
+3 июля · 07:09
+входящий · 7400095342
+Точка: Весны (доб. 25)
+Категория: …
+
+Ошибка: …
+
+Проблема:
+…
+```
+
++ DOCX с расшифровкой (без цитат в тексте сообщения).  
+Сводка дня в начале (`format_day_summary()`).  
+Если Mango не отдал статистику (баланс / 429 / пустой ответ) — в сводке **«🔴 Статистика недоступна»** (жирный HTML), а не «Входящих: 0».
+
+---
+
+## Расшифровки — постобработка (`transcript_utils.py`)
+
+**Актуально с 04.07.2026:**
+
+1. **Без ролей** «Администратор» / «Клиент» в DOCX — только текст реплик (`transcript_paragraphs()`).
+2. **Цифры цифрами:** `семнадцать ноль ноль` → `17:00`, `пятнадцать пятнадцать` → `15:15`, отдельные числа прописью → цифры.
+3. **Дедупликация** повторов Yandex в `refine_segments()`.
+4. QC (`call_qc.py`) работает по **полному тексту** диалога (роли не нужны).
+
+> Старые функции `apply_speaker_roles` / `apply_content_roles` в коде остались, но **не вызываются** из `refine_segments`.
 
 ---
 
 ## Архитектура
 
 ```
-Mango Office (ручной экспорт HTML)
+MANGO_SITES (moscow + krasnoyarsk)
         ↓
-  GitHub mangocursor  или  папка incoming на VPS
+mango_sync.py --site X --yandex  →  HTML в calls/{site}/
         ↓
-  daily_pipeline.py (VPS, cron 20:00 МСК)
+call_qc.py
         ↓
-  auto-select проблемных → DOCX → Telegram
+daily_pipeline.py / send_day_to_telegram.py --site X
+        ↓
+Telegram: сводка + bad/uncertain + DOCX
 ```
 
-**Полная автоматизация из Mango API** — пока не подключена (дорого/сложно); обходной путь — ручной экспорт HTML → git push или upload на сервер.
+**Mango API только чтение:** `stats/request`, `stats/result`, `queries/recording/post` (download).  
+Настройки АТС **не меняем**.
+
+**Yandex SpeechKit** вместо Mango SA (~0.2₽/мин).
 
 ---
 
-## Репозиторий и пути
+## VPS (Timeweb Amsterdam)
 
-| Что | Где |
-|-----|-----|
-| Локальный проект | `C:\Users\chief\Desktop\cursor\mangocursor` |
-| GitHub | https://github.com/chiefharm/mangocursor |
-| Ветка | `master` |
+| Параметр | Значение |
+|----------|----------|
+| IP | `YOUR_VPS_IP` (`deploy/vps.host`) |
+| Путь | `/opt/mango-pipeline` |
+| SSH | `ssh -i ~/.ssh/id_ed25519 root@YOUR_VPS_IP` |
+| Таймер | **10:00 МСК** (`mango-pipeline.timer`, OnCalendar 07:00 UTC) |
+
+`daily_pipeline.py` обрабатывает **оба** site за один запуск; «вчера» считается по TZ каждого site.
+
+**Важно:** пайплайн шлёт только звонки **за вчера** (префикс `YYYY-MM-DD__` в имени HTML), не весь архив.
 
 ---
 
@@ -63,91 +149,93 @@ Mango Office (ручной экспорт HTML)
 
 | Файл | Назначение |
 |------|------------|
-| `daily_pipeline.py` | **Главный скрипт для VPS:** автоотбор, DOCX, Telegram, учёт уже отправленных |
-| `send_calls_to_telegram.py` | Отправка по списку `selected_calls.json` (локально / Windows) |
-| `process_calls_to_telegram.ps1` | PowerShell-версия для Windows |
-| `selected_calls.json` | Ручной список звонков для отправки |
-| `deploy/vps_install.sh` | Установка на VPS + systemd timer |
-| `.env` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (не коммитить!) |
-| `data/sent_calls.json` | На VPS: какие файлы уже отправлены |
+| `site_config.py` | Два Mango-аккаунта, пути, группы Telegram |
+| `site_lines.py` | Филиалы Красноярска, фильтр добавочных |
+| `telegram_notify.py` | `site_chat_ids(site)` — маршрутизация |
+| `telegram_format.py` | Формат сообщений + `site_label`, `branch` |
+| `call_qc.py` | QC, сводка дня |
+| `transcript_utils.py` | Парсинг HTML, цифры, без ролей |
+| `daily_pipeline.py` | Автоматика (multi-site) |
+| `send_day_to_telegram.py` | Ручная отправка `--site moscow\|krasnoyarsk` |
+| `mango_sync.py` | Синк + `--site` + фильтр филиалов |
+| `data/sent_calls_{site_id}.json` | Уже отправленные (на VPS) |
+
+Память AI: `PROJECT_MEMORY.md`, `SESSION_LOG.md`, `CODE_MAP.md`, `AGENTS.md`.
 
 ---
-
-## Telegram
-
-- **Бот для расшифровок звонков** — отдельный бот (токен в `.env`)
-- **@hermes_cursor_agent_bot** — другой бот (мост cursor-tg на VPS), **не путать** с ботом расшифровок
-- `TELEGRAM_CHAT_ID` владельца: личный чат (числовой id)
-
-Секреты только в `.env`, никогда не коммитить.
-
----
-
-## VPS (Timeweb)
-
-| Параметр | Значение |
-|----------|----------|
-| IP | `OLD_VPS_IP` |
-| ОС | Ubuntu 24.04 |
-| Путь пайплайна | `/opt/mango-pipeline` |
-| cursor-tg (Hermes) | `/opt/cursor-tg` |
-| Расписание | ежедневно 20:00 МСК (`mango-pipeline.timer`) |
-
-**Статус на 2026-06:** SSH по ключу `chief-vps` может не работать после переустановки сервера — нужно заново добавить публичный ключ в панели Timeweb.
-
----
-
-## Команды (локально, Windows)
-
-```powershell
-cd C:\Users\chief\Desktop\cursor\mangocursor
-
-# Подготовка без отправки
-python daily_pipeline.py --dry-run
-
-# Отправка по selected_calls.json
-python send_calls_to_telegram.py --send-as-files
-```
 
 ## Команды (VPS)
 
 ```bash
-# После deploy/vps_install.sh
-nano /opt/mango-pipeline/.env
-/opt/mango-pipeline/.venv/bin/python /opt/mango-pipeline/daily_pipeline.py --base-dir /opt/mango-pipeline --dry-run
-systemctl start mango-pipeline.service
+cd /opt/mango-pipeline
+
+# Синк + STT за день (Красноярск)
+.venv/bin/python mango_sync.py --site krasnoyarsk --date 2026-07-03 --yandex
+
+# Отправить косячные за день
+.venv/bin/python send_day_to_telegram.py --site moscow --date 2026-07-03
+.venv/bin/python send_day_to_telegram.py --site krasnoyarsk --date 2026-07-03
+
+# Автоматика (оба города)
+.venv/bin/python daily_pipeline.py --base-dir /opt/mango-pipeline --mango-sync --mango-days 1
+
 systemctl status mango-pipeline.timer
 ```
 
 ---
 
-## Что уже сделано
+## Известные инциденты
 
-- [x] Разбор 41 HTML-расшифровки, категории проблемных звонков
-- [x] Отправка в Telegram (текст, TXT, HTML, DOCX) — **DOCX на iPhone работает лучше всего**
-- [x] `daily_pipeline.py` + деплой-скрипт для VPS
-- [x] Push в GitHub `chiefharm/mangocursor`
-- [ ] Завершить деплой на VPS (нужен SSH-ключ)
-- [ ] Автозагрузка расшифровок из Mango API (ждём ответ поддержки Mango)
-
----
-
-## Типичные запросы владельца
-
-1. «Проверь новые звонки по критериям» → auto-select / grep по HTML → список + комментарии
-2. «Отправь в Telegram» → DOCX + короткий комментарий перед каждым файлом
-3. «Настрой автоматом каждый день» → VPS + `daily_pipeline.py` + cron
-4. «Сохрани в GitHub» → commit + push (не трогать `.env`)
+| Период | Что |
+|--------|-----|
+| 26.06–02.07 | Записей Mango нет в API — **звонки не работали** (не баг нашего кода). 25.06 записи есть. |
+| 25–26.06 | Перебои мобильного интернета Москва (не сбой Mango). |
+| 01–03.07 | Timeweb Qupra NL — VPS недоступен, восстановлен 03.07. |
+| 03.07 | Баг: пайплайн слал **весь архив** (апрель–май) → исправлено: только вчера. |
 
 ---
 
-## Ограничения и нюансы
+## История решений (кратко)
 
-- Python на Windows через Store иногда нестабилен; для VPS — `python3` + venv
-- DOCX на Windows: Word COM; на Linux: `python-docx`
-- Не использовать длинные сообщения в Telegram для iPhone — только DOCX или короткие части
-- Mango CSV не заменяет HTML для полных расшифровок
+| Дата | Решение |
+|------|---------|
+| 2026-06 | Yandex STT, QC-фильтр, VPS Amsterdam |
+| 2026-07-03 | Формат Telegram, роли STT (потом отменены) |
+| 2026-07-04 | **Второй аккаунт Красноярск**, multi-site |
+| 2026-07-04 | Маршрутизация Telegram по группам |
+| 2026-07-04 | **Убраны роли** в DOCX, усилена нормализация цифр |
+| 2026-07-04 | Фильтр филиалов Красноярска (05/12/25) |
 
 ---
 
-*Последнее обновление: 2026-06-25*
+## Отчёты выручки (с 23.07.2026)
+
+Скрипт: `revenue_report.py`  
+Cron: `0 5 * * *` (Europe/Moscow) → `deploy/install_revenue_cron.sh`  
+Куда: только личка `TELEGRAM_CHAT_ID` (пока без групп).
+
+Каждый запуск **скачивает свежие** Excel с публичных ссылок Яндекс.Диска (`REVENUE_YADISK_KRAS`, `REVENUE_YADISK_MSK`), считает, шлёт, временные файлы удаляет.
+
+Сообщения:
+1–3. Красноярск: Дубровинского / Новосибирская / Весны  
+4. Москва: Фили  
+
+Прогноз конца месяца = среднее из:
+- текущий средний день × оставшиеся дни  
+- сумма факта за тот же «хвост» месяца в −1 мес  
+- то же за −2 мес  
+
+Плюс сравнение MTD с −1/−2 мес и с тем же месяцем год назад.
+
+---
+
+## Ограничения
+
+- Telegram с ПК РФ — таймаут → только VPS
+- QC — эвристика; владелец дообучает по «сомнительным»
+- Yandex STT склеивает реплики → ответ админа может быть в одной строке с клиентом
+- ~30 записей/день Красноярск могут не расшифроваться (короткие / лимиты Yandex)
+
+---
+
+*Последнее обновление: 2026-07-04*
