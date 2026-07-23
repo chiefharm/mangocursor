@@ -5,16 +5,18 @@ alwaysApply: true
 
 # MangoCursor — правило для AI
 
-Перед любой задачей в этом репозитории **прочитай `PROJECT_MEMORY.md`** в корне проекта.
+Перед любой задачей прочитай **`PROJECT_MEMORY.md`**, **`SESSION_LOG.md`**, **`CODE_MAP.md`**.
 
 ## Кратко
 
-- Салон красоты «Сока», речевая аналитика Mango Office
-- Цель: автоотбор проблемных звонков → расшифровка + комментарий → Telegram
+- Салон красоты «Сока», Mango Office + Yandex STT
+- Telegram **только через VPS**; формат — `telegram_format.py`
+- Память дублируется на VPS: `/opt/mango-pipeline/*.md`
 - **Формат для iPhone: DOCX** (не TXT/HTML в Telegram)
 - Главный скрипт на сервере: `daily_pipeline.py`
 - Секреты в `.env`, не коммитить
-- GitHub: `chiefharm/mangocursor`, VPS: `72.56.249.113`, путь `/opt/mango-pipeline`
-- Входные данные: HTML-расшифровки из Mango (ручной экспорт → git или `incoming/`)
+- GitHub: `chiefharm/mangocursor`, VPS IP в `deploy/vps.host`, путь `/opt/mango-pipeline`
+- Отправлять только **косячные** звонки (`call_qc.py`); хорошие — пропускать
+- Расшифровки: Yandex STT → роли Администратор/Клиент → QC → Telegram
 
-При изменениях пайплайна обновляй `PROJECT_MEMORY.md`.
+При изменениях обновляй `PROJECT_MEMORY.md` и `SESSION_LOG.md`, копируй на VPS.

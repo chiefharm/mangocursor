@@ -1,0 +1,16 @@
+---
+description: Контекст проекта mangocursor — Mango звонки → Telegram DOCX
+alwaysApply: true
+---
+
+# mangocursor — обязательный контекст
+
+Перед любой задачей в этом репозитории прочитай `PROJECT_MEMORY.md`.
+
+Кратко:
+- Салон красоты, анализируем проблемные звонки из Mango Office.
+- Отправляем в Telegram: короткий комментарий + DOCX (лучше для iPhone).
+- Продакшен на VPS `72.56.249.113`, путь `/opt/mango-pipeline`, скрипт `daily_pipeline.py`.
+- GitHub: `chiefharm/mangocursor`, ветка `master`.
+- Источник данных сейчас: HTML-расшифровки (ручной экспорт из Mango).
+- Не коммитить `.env` и токены.

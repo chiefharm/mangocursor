@@ -24,11 +24,11 @@ $PYTHON_BIN -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 echo "==> Creating folders..."
-mkdir -p "$APP_DIR/data" "$APP_DIR/telegram_docx" "$APP_DIR/incoming"
+mkdir -p "$APP_DIR/data" "$APP_DIR/data/webhooks" "$APP_DIR/data/calls" "$APP_DIR/telegram_docx" "$APP_DIR/incoming"
 
 if [ ! -f "$APP_DIR/.env" ]; then
   cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-  echo "[WARN] Fill $APP_DIR/.env with TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"
+  echo "[WARN] Fill $APP_DIR/.env with TELEGRAM_* and MANGO_VPBX_* keys"
 fi
 
 echo "==> Installing systemd service..."
@@ -41,16 +41,16 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/mango-pipeline
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/mango-pipeline/.venv/bin/python /opt/mango-pipeline/daily_pipeline.py --base-dir /opt/mango-pipeline --git-pull
+ExecStart=/opt/mango-pipeline/.venv/bin/python /opt/mango-pipeline/daily_pipeline.py --base-dir /opt/mango-pipeline --mango-sync --mango-days 1
 UNIT
 
-echo "==> Installing timer (daily 20:00 MSK ~= 17:00 UTC)..."
+echo "==> Installing timer (daily 10:00 MSK = 07:00 UTC on VPS)..."
 cat > /etc/systemd/system/mango-pipeline.timer <<'TIMER'
 [Unit]
-Description=Run Mango pipeline daily
+Description=Run Mango pipeline daily at 10:00 MSK (07:00 UTC)
 
 [Timer]
-OnCalendar=*-*-* 17:00:00
+OnCalendar=*-*-* 07:00:00
 Persistent=true
 
 [Install]
@@ -61,8 +61,14 @@ systemctl daemon-reload
 systemctl enable mango-pipeline.timer
 systemctl restart mango-pipeline.timer
 
+echo "==> Telegram connectivity check..."
+if curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://api.telegram.org | grep -qE '^(200|302|404)$'; then
+  echo "[OK] api.telegram.org reachable"
+else
+  echo "[WARN] api.telegram.org slow or blocked — pick another VPS region"
+fi
+
 echo "==> Done."
-echo "1) Edit /opt/mango-pipeline/.env"
-echo "2) Put new HTML calls into /opt/mango-pipeline (or push to GitHub and use --git-pull)"
-echo "3) Test run: /opt/mango-pipeline/.venv/bin/python /opt/mango-pipeline/daily_pipeline.py --base-dir /opt/mango-pipeline --dry-run"
-echo "4) Real run: systemctl start mango-pipeline.service"
+echo "1) Edit /opt/mango-pipeline/.env (Telegram + Mango API keys)"
+echo "2) Test sync: /opt/mango-pipeline/.venv/bin/python /opt/mango-pipeline/mango_sync.py --base-dir /opt/mango-pipeline --days 1"
+echo "3) Test pipeline: /opt/mango-pipeline/.venv/bin/python /opt/mango-pipeline/daily_pipeline.py --base-dir /opt/mango-pipeline --dry-run"
