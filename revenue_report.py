@@ -368,9 +368,12 @@ def month_short_ru(y: int, m: int, *, with_year: bool = False) -> str:
     return f"{name} {y}" if with_year else name
 
 
-def format_branch_report(
+def spoiler(text: str) -> str:
+    return f'<span class="tg-spoiler">{text}</span>'
+
+
+def format_branch_block(
     *,
-    city: str,
     branch: str,
     as_of: date,
     current: MonthSheet,
@@ -394,34 +397,66 @@ def format_branch_report(
         else f"Факт: {num(fc.mtd)}"
     )
 
+    hist_lines: list[str] = []
+    for i, tail in enumerate(fc.hist_tails, start=1):
+        _py, pm = _shift_month(current.year, current.month, -i)
+        hist_lines.append(f"в {MONTH_PREP_RU[pm]} за тот же период было {num(tail)}")
+    hist_lines.append(f"среднее по хвосту: {num(fc.avg_tail)}")
+
+    compare_lines = ["Сравнение (итог / на ту же дату):"]
+    if prev1 is not None:
+        then_mtd = mtd_fact(prev1, as_of)
+        compare_lines.append(
+            f"{month_short_ru(prev1.year, prev1.month)}: "
+            f"{num(prev1.month_fact)} / {num(then_mtd)} ({pct_delta(fc.mtd, then_mtd)})"
+        )
+    if prev2 is not None:
+        then_mtd = mtd_fact(prev2, as_of)
+        compare_lines.append(
+            f"{month_short_ru(prev2.year, prev2.month)}: "
+            f"{num(prev2.month_fact)} / {num(then_mtd)} ({pct_delta(fc.mtd, then_mtd)})"
+        )
+    if yoy is not None:
+        then_mtd = mtd_fact(yoy, as_of)
+        compare_lines.append(
+            f"с прошлым годом: {num(yoy.month_fact)} / {num(then_mtd)} "
+            f"({pct_delta(fc.mtd, then_mtd)})"
+        )
+
     lines = [
-        b(f"{city} · {branch}"),
-        f"на {as_of.strftime('%d.%m.%Y')} · {month_title_ru(current.year, current.month)}",
-        "",
+        b(branch),
         plan_fact,
         "",
         "Прогноз:",
         f"по текущему темпу сделаем ещё {num(fc.pace_tail)}",
+        spoiler("\n".join(hist_lines)),
+        f"ожидаемая выручка за месяц: {num(fc.forecast_total)}",
+        f"→ {verdict}",
+        "",
+        spoiler("\n".join(compare_lines)),
     ]
-    for i, tail in enumerate(fc.hist_tails, start=1):
-        _py, pm = _shift_month(current.year, current.month, -i)
-        lines.append(f"в {MONTH_PREP_RU[pm]} за тот же период было {num(tail)}")
-    lines.append(f"среднее по хвосту: {num(fc.avg_tail)}")
-    lines.append(f"ожидаемая выручка за месяц: {num(fc.forecast_total)}")
-    lines.append(f"→ {verdict}")
+    return "\n".join(lines)
 
-    lines.append("")
-    lines.append("Сравнение (итог / на ту же дату):")
-    for sheet, with_year in ((prev1, False), (prev2, False), (yoy, True)):
-        if sheet is None:
-            continue
-        then_mtd = mtd_fact(sheet, as_of)
-        end = sheet.month_fact
-        label = month_short_ru(sheet.year, sheet.month, with_year=with_year)
+
+def format_network_total(
+    *,
+    city: str,
+    as_of: date,
+    mtd_total: float,
+    yoy_mtd_total: float | None,
+) -> str:
+    lines = [
+        "",
+        b(f"Итого сеть {city}"),
+        f"выручка за период: {num(mtd_total)}",
+    ]
+    if yoy_mtd_total is None:
+        lines.append("с прошлым годом за тот же период: нет данных")
+    else:
         lines.append(
-            f"{label}: {num(end)} / {num(then_mtd)} ({pct_delta(fc.mtd, then_mtd)})"
+            f"с прошлым годом за тот же период: {num(yoy_mtd_total)} "
+            f"({pct_delta(mtd_total, yoy_mtd_total)})"
         )
-
     return "\n".join(lines)
 
 
@@ -443,36 +478,95 @@ def resolve_as_of(months: dict[tuple[int, int], MonthSheet], today: date) -> tup
     return min(max(facts), today), sheet
 
 
+def build_branch_payload(
+    months: dict[tuple[int, int], MonthSheet], today: date
+) -> dict:
+    as_of, current = resolve_as_of(months, today)
+    p1 = months.get(_shift_month(current.year, current.month, -1))
+    p2 = months.get(_shift_month(current.year, current.month, -2))
+    yoy = months.get((current.year - 1, current.month))
+    hist = [s for s in (p1, p2) if s is not None]
+    fc = build_forecast(current, hist, as_of)
+    yoy_mtd = mtd_fact(yoy, as_of) if yoy is not None else None
+    return {
+        "as_of": as_of,
+        "current": current,
+        "fc": fc,
+        "prev1": p1,
+        "prev2": p2,
+        "yoy": yoy,
+        "yoy_mtd": yoy_mtd,
+    }
+
+
 def reports_for_file(
     path: Path,
     *,
     city: str,
     branches: tuple[tuple[int, int, int, str], ...],
     today: date,
+    combine: bool = False,
 ) -> list[str]:
     data = load_workbook_months(path, branches)
-    messages: list[str] = []
+    payloads: list[tuple[str, dict]] = []
     for *_, label in branches:
-        months = data[label]
-        as_of, current = resolve_as_of(months, today)
-        p1 = months.get(_shift_month(current.year, current.month, -1))
-        p2 = months.get(_shift_month(current.year, current.month, -2))
-        yoy = months.get((current.year - 1, current.month))
-        hist = [s for s in (p1, p2) if s is not None]
-        fc = build_forecast(current, hist, as_of)
-        messages.append(
-            format_branch_report(
-                city=city,
+        payloads.append((label, build_branch_payload(data[label], today)))
+
+    if not combine:
+        messages: list[str] = []
+        for label, p in payloads:
+            date_line = (
+                f"на {p['as_of'].strftime('%d.%m.%Y')} · "
+                f"{month_title_ru(p['current'].year, p['current'].month)}"
+            )
+            block = format_branch_block(
+                branch=f"{city} · {label}",
+                as_of=p["as_of"],
+                current=p["current"],
+                fc=p["fc"],
+                prev1=p["prev1"],
+                prev2=p["prev2"],
+                yoy=p["yoy"],
+            )
+            title, _, rest = block.partition("\n")
+            messages.append(f"{title}\n{date_line}\n{rest}" if rest else f"{title}\n{date_line}")
+        return messages
+
+    # Combined city message (Krasnoyarsk)
+    as_of = max(p["as_of"] for _, p in payloads)
+    year = payloads[0][1]["current"].year
+    month = payloads[0][1]["current"].month
+    chunks = [
+        b(city),
+        f"на {as_of.strftime('%d.%m.%Y')} · {month_title_ru(year, month)}",
+        "",
+    ]
+    mtd_total = 0.0
+    yoy_parts: list[float] = []
+    for i, (label, p) in enumerate(payloads):
+        if i:
+            chunks.append("")
+        chunks.append(
+            format_branch_block(
                 branch=label,
-                as_of=as_of,
-                current=current,
-                fc=fc,
-                prev1=p1,
-                prev2=p2,
-                yoy=yoy,
+                as_of=p["as_of"],
+                current=p["current"],
+                fc=p["fc"],
+                prev1=p["prev1"],
+                prev2=p["prev2"],
+                yoy=p["yoy"],
             )
         )
-    return messages
+        mtd_total += p["fc"].mtd
+        if p["yoy_mtd"] is not None:
+            yoy_parts.append(p["yoy_mtd"])
+    yoy_total = sum(yoy_parts) if len(yoy_parts) == len(payloads) else None
+    chunks.append(
+        format_network_total(
+            city=city, as_of=as_of, mtd_total=mtd_total, yoy_mtd_total=yoy_total
+        )
+    )
+    return ["\n".join(chunks)]
 
 
 def main() -> None:
@@ -511,12 +605,27 @@ def main() -> None:
 
         messages.extend(
             reports_for_file(
-                kras_path, city="Красноярск", branches=KRAS_BRANCHES, today=today
+                kras_path,
+                city="Красноярск",
+                branches=KRAS_BRANCHES,
+                today=today,
+                combine=True,
             )
         )
         messages.extend(
-            reports_for_file(msk_path, city="Москва", branches=(MSK_BRANCH,), today=today)
+            reports_for_file(
+                msk_path,
+                city="Москва",
+                branches=(MSK_BRANCH,),
+                today=today,
+                combine=False,
+            )
         )
+
+    # Telegram limit 4096
+    for msg in messages:
+        if len(msg) > 4000:
+            print(f"[WARN] message length {len(msg)} near Telegram limit")
 
     if args.dry_run:
         for i, msg in enumerate(messages, 1):
