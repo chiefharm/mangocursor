@@ -159,55 +159,211 @@ def parse_sheet_year_month(title: str) -> tuple[int, int] | None:
     return year, month
 
 
-def _pick_summary_row(ws, plan_col: int, fact_col: int) -> tuple[float | None, float | None, float | None]:
-    """Last row with plan+fact numbers and no date in col A (or date = month end marker)."""
-    best = (None, None, None)
-    for r in range(ws.max_row or 1, 0, -1):
+def _is_summary_row(ws, r: int, plan_col: int, fact_col: int) -> bool:
+    """Bottom total row or duplicate summary with a date."""
+    day = _as_date(ws.cell(r, 1).value)
+    plan = _num(ws.cell(r, plan_col).value)
+    fact = _num(ws.cell(r, fact_col).value)
+    if day is None:
+        # no date + monthly-scale plan = итоговая строка
+        return plan is not None and plan >= 50_000
+    if plan is not None and plan >= 200_000:
+        return True
+    if fact is not None and fact >= 400_000:
+        return True
+    return False
+
+
+def _find_bottom_summary(
+    ws, plan_col: int, fact_col: int
+) -> tuple[float | None, float | None, int | None]:
+    """Итог внизу: строка без даты в колонке A."""
+    for r in range(ws.max_row or 1, 1, -1):
+        if _as_date(ws.cell(r, 1).value) is not None:
+            continue
         plan = _num(ws.cell(r, plan_col).value)
         fact = _num(ws.cell(r, fact_col).value)
-        day = _as_date(ws.cell(r, 1).value)
-        # summary: large plan (monthly) — typically no day, or last day duplicated
-        if plan is None or fact is None:
+        if plan is not None:
+            return plan, fact, r
+    return None, None, None
+
+
+def _pct_matches(plan: float | None, fact: float | None, pct_raw) -> bool:
+    pct = _num(pct_raw)
+    if pct is None or plan is None or fact is None or plan == 0:
+        return True
+    expected = fact / plan
+    return abs(pct - expected) < 0.05
+
+
+def _score_columns(ws, year: int, month: int, plan_col: int, fact_col: int, pct_col: int) -> int:
+    """Higher = more likely correct branch columns (pct ≈ fact/plan, plans non-decreasing)."""
+    score = 0
+    prev_plan: float | None = None
+    for r in range(2, min((ws.max_row or 1) + 1, 36)):
+        if _is_summary_row(ws, r, plan_col, fact_col):
             continue
-        if plan >= 100_000:  # monthly plan scale
-            pct = _num(ws.cell(r, plan_col + 2).value)
-            if pct is None and plan:
-                pct = fact / plan
-            # prefer rows without a day date
-            if day is None:
-                return plan, fact, pct
-            best = (plan, fact, pct)
-    return best
-
-
-def read_branch_month(ws, year: int, month: int, title: str, plan_col: int, fact_col: int, pct_col: int) -> MonthSheet:
-    days: list[DayRow] = []
-    for r in range(2, (ws.max_row or 1) + 1):
         d = _as_date(ws.cell(r, 1).value)
         if d is None:
             continue
-        # sheets sometimes keep previous calendar year in date cells — trust sheet month
+        plan = _num(ws.cell(r, plan_col).value)
+        fact = _num(ws.cell(r, fact_col).value)
+        pct_raw = ws.cell(r, pct_col).value
+        if plan is None and fact is None:
+            continue
+        if plan is not None and prev_plan is not None:
+            if plan >= prev_plan:
+                score += 2
+            else:
+                score -= 5
+        if plan is not None:
+            prev_plan = plan
+        if _pct_matches(plan, fact, pct_raw):
+            score += 3
+        if plan is not None and 5_000 <= plan <= 200_000:
+            score += 1
+        if fact is not None and fact > 0:
+            score += 1
+    return score
+
+
+def _resolve_columns(
+    ws,
+    year: int,
+    month: int,
+    plan_col: int,
+    fact_col: int,
+    pct_col: int,
+    label: str,
+) -> tuple[int, int, int, list[str]]:
+    warnings: list[str] = []
+    candidates = [(plan_col, fact_col, pct_col)]
+    for delta in (-1, 1):
+        pc, fc, cc = plan_col + delta, fact_col + delta, pct_col + delta
+        if pc >= 2 and cc <= (ws.max_column or 1):
+            candidates.append((pc, fc, cc))
+
+    best = max(candidates, key=lambda c: _score_columns(ws, year, month, *c))
+    if best != (plan_col, fact_col, pct_col):
+        warnings.append(
+            f"{label}: колонки сдвинуты {plan_col}/{fact_col} → {best[0]}/{best[1]} (проверка % и роста плана)"
+        )
+    return best[0], best[1], best[2], warnings
+
+
+def _read_daily_rows(
+    ws,
+    year: int,
+    month: int,
+    plan_col: int,
+    fact_col: int,
+    label: str,
+    *,
+    warn: bool,
+) -> tuple[list[DayRow], list[str]]:
+    days: list[DayRow] = []
+    warnings: list[str] = []
+    prev_day: int | None = None
+    cum_plan = 0.0
+    prev_cum = 0.0
+
+    for r in range(2, (ws.max_row or 1) + 1):
+        if _is_summary_row(ws, r, plan_col, fact_col):
+            continue
+        d = _as_date(ws.cell(r, 1).value)
+        if d is None:
+            continue
         try:
             d = date(year, month, d.day)
         except ValueError:
+            if warn:
+                warnings.append(f"{label}: некорректная дата в строке {r}")
             continue
+
+        if prev_day is not None and d.day < prev_day and warn:
+            warnings.append(f"{label}: дата {d.day} раньше предыдущей ({prev_day}), строка {r}")
+
         plan = _num(ws.cell(r, plan_col).value)
         fact = _num(ws.cell(r, fact_col).value)
-        # monthly summary row often repeats month-end date with huge plan/fact
-        if (plan is not None and plan >= 200_000) or (fact is not None and fact >= 400_000):
-            continue
+
+        if plan is not None:
+            cum_plan += plan
+            if warn and cum_plan < prev_cum:
+                warnings.append(f"{label}: накопительный план уменьшился на {d:%d.%m}")
+            prev_cum = cum_plan
+            # дневной план не должен быть похож на месячный итог (ошибка колонки)
+            if warn and plan >= 500_000:
+                warnings.append(
+                    f"{label}: подозрительно большой дневной план {int(plan)} на {d:%d.%m} (стр. {r})"
+                )
+
+        prev_day = d.day
         days.append(DayRow(day=d, plan=plan, fact=fact))
 
-    month_plan, month_fact, month_pct = _pick_summary_row(ws, plan_col, fact_col)
-    if month_plan is None:
-        # fallback: sum daily plans
-        plans = [x.plan for x in days if x.plan is not None]
-        month_plan = sum(plans) if plans else None
-    if month_fact is None:
-        facts = [x.fact for x in days if x.fact is not None]
-        month_fact = sum(facts) if facts else None
-    if month_pct is None and month_plan and month_fact is not None:
-        month_pct = month_fact / month_plan
+    return days, warnings
+
+
+def read_branch_month(
+    ws,
+    year: int,
+    month: int,
+    title: str,
+    plan_col: int,
+    fact_col: int,
+    pct_col: int,
+    label: str = "",
+    *,
+    warn: bool = False,
+) -> MonthSheet:
+    branch = label or f"col{plan_col}"
+    plan_col, fact_col, pct_col, col_warnings = _resolve_columns(
+        ws, year, month, plan_col, fact_col, pct_col, branch
+    )
+    if not warn:
+        col_warnings = []
+
+    days, day_warnings = _read_daily_rows(ws, year, month, plan_col, fact_col, branch, warn=warn)
+    warnings = col_warnings + day_warnings
+
+    sum_plan = sum(d.plan or 0 for d in days)
+    sum_fact = sum(d.fact or 0 for d in days)
+    bottom_plan, bottom_fact, bottom_row = _find_bottom_summary(ws, plan_col, fact_col)
+
+    # План месяца = сумма дневных планов (основной источник)
+    month_plan = sum_plan if sum_plan > 0 else bottom_plan
+
+    if bottom_plan is not None and sum_plan > 0:
+        tol = max(100.0, sum_plan * 0.001)
+        if abs(bottom_plan - sum_plan) > tol:
+            warnings.append(
+                f"{branch}: итог внизу (стр. {bottom_row}) план {int(bottom_plan)} "
+                f"≠ сумма дней {int(sum_plan)} — берём сумму дней"
+            )
+            month_plan = sum_plan
+        elif month_plan is None:
+            month_plan = bottom_plan
+
+    # Факт месяца: итог внизу, если сходится с суммой дней
+    if bottom_fact is not None and sum_fact > 0:
+        tol = max(500.0, sum_fact * 0.02)
+        if abs(bottom_fact - sum_fact) <= tol:
+            month_fact = bottom_fact
+        else:
+            month_fact = sum_fact
+            warnings.append(
+                f"{branch}: итог внизу факт {int(bottom_fact)} "
+                f"≠ сумма дней {int(sum_fact)} — берём сумму дней"
+            )
+    elif bottom_fact is not None:
+        month_fact = bottom_fact
+    else:
+        month_fact = sum_fact if sum_fact > 0 else None
+
+    month_pct = (month_fact / month_plan) if month_plan and month_fact is not None else None
+
+    for w in warnings:
+        if warn:
+            print(f"[WARN] {w}")
 
     return MonthSheet(
         year=year,
@@ -220,7 +376,12 @@ def read_branch_month(ws, year: int, month: int, title: str, plan_col: int, fact
     )
 
 
-def load_workbook_months(path: Path, branches: Iterable[tuple[int, int, int, str]]) -> dict[str, dict[tuple[int, int], MonthSheet]]:
+def load_workbook_months(
+    path: Path,
+    branches: Iterable[tuple[int, int, int, str]],
+    *,
+    warn_month: tuple[int, int] | None = None,
+) -> dict[str, dict[tuple[int, int], MonthSheet]]:
     """branch_label -> {(year, month): MonthSheet}"""
     wb = load_workbook(path, data_only=True)
     out: dict[str, dict[tuple[int, int], MonthSheet]] = {label: {} for *_, label in branches}
@@ -230,9 +391,19 @@ def load_workbook_months(path: Path, branches: Iterable[tuple[int, int, int, str
             continue
         year, month = ym
         ws = wb[title]
+        do_warn = warn_month == (year, month)
         for plan_col, fact_col, pct_col, label in branches:
-            sheet = read_branch_month(ws, year, month, title, plan_col, fact_col, pct_col)
-            # keep first match; later duplicates (efficiency sheets filtered already)
+            sheet = read_branch_month(
+                ws,
+                year,
+                month,
+                title,
+                plan_col,
+                fact_col,
+                pct_col,
+                label,
+                warn=do_warn,
+            )
             out[label].setdefault((year, month), sheet)
     return out
 
@@ -507,7 +678,9 @@ def reports_for_file(
     today: date,
     combine: bool = False,
 ) -> list[str]:
-    data = load_workbook_months(path, branches)
+    data = load_workbook_months(
+        path, branches, warn_month=(today.year, today.month)
+    )
     payloads: list[tuple[str, dict]] = []
     for *_, label in branches:
         payloads.append((label, build_branch_payload(data[label], today)))
