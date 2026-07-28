@@ -80,6 +80,13 @@ build_call_message(..., site_label, branch)
 - `mango-pipeline.timer` — 07:00 UTC = 10:00 MSK
 - `mango-pipeline.service` — `daily_pipeline.py --mango-sync --mango-days 1`
 
+## SOCO Salon — AI-примерка (отдельная задача)
+
+| Файл | Назначение |
+|------|------------|
+| `docs/soco-salon-ai-tryon-session.md` | Переписка 28.07.2026: Perfect Corp vs AILab, архитектура, TODO |
+| `tools/hair_tryon_test/run_comparison.py` | Тест API примерки (ключи в env, не в git) |
+
 ---
 
-*Обновлено: 2026-07-04*
+*Обновлено: 2026-07-28*
