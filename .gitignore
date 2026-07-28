@@ -10,6 +10,8 @@ venv/
 data/
 telegram_exports/
 telegram_exports_html/
+selected_calls.json
+index.html
 telegram_docx/
 deploy/vps.host
 _revenue_src/
@@ -20,6 +22,8 @@ _site_light_imgs/
 _speed_baseline/
 _upload_light/
 *.html
+selected_calls.json
+index.html
 !TELEGRAM_SETUP.md
 !MANGO_API_SETUP.md
 !YANDEX_STT_SETUP.md
