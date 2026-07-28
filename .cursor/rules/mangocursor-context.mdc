@@ -10,7 +10,7 @@ alwaysApply: true
 Кратко:
 - Салон красоты, анализируем проблемные звонки из Mango Office.
 - Отправляем в Telegram: короткий комментарий + DOCX (лучше для iPhone).
-- Продакшен на VPS `OLD_VPS_IP`, путь `/opt/mango-pipeline`, скрипт `daily_pipeline.py`.
+- Продакшен на VPS (IP в `deploy/vps.host`, не в git), путь `/opt/mango-pipeline`, скрипт `daily_pipeline.py`.
 - GitHub: `chiefharm/mangocursor`, ветка `master`.
 - Источник данных сейчас: HTML-расшифровки (ручной экспорт из Mango).
 - Не коммитить `.env` и токены.

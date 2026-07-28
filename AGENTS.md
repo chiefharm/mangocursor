@@ -6,7 +6,7 @@
    - `CODE_MAP.md` — карта файлов
 2. На VPS те же файлы: `/opt/mango-pipeline/`
 3. **Не коммить** `.env`, API keys, salts, bot tokens.
-4. Telegram — **только с VPS** (`deploy/vps.host` → `YOUR_VPS_IP`).
+4. Telegram — **только с VPS** (IP в `deploy/vps.host`, см. `deploy/vps.host.example`).
 5. Отправлять **только косячные** + сомнительные; хорошие — skip.
 6. **Multi-site:** `--site moscow` или `--site krasnoyarsk`; оба в `daily_pipeline`.
 7. **Telegram routing:** `site_chat_ids(site)` — Москва → личка + «Москва Фили»; Красноярск → личка + «soco красноярsk». Не использовать `TELEGRAM_EXTRA_CHAT_IDS`.
@@ -17,5 +17,6 @@
 12. После важных изменений — обнови память и скопируй на VPS:
 
 ```powershell
-scp -i $env:USERPROFILE\.ssh\id_ed25519 PROJECT_MEMORY.md SESSION_LOG.md CODE_MAP.md AGENTS.md root@YOUR_VPS_IP:/opt/mango-pipeline/
+$vps = (Get-Content deploy/vps.host -Raw).Trim()
+scp -i $env:USERPROFILE\.ssh\id_ed25519 PROJECT_MEMORY.md SESSION_LOG.md CODE_MAP.md AGENTS.md root@${vps}:/opt/mango-pipeline/
 ```

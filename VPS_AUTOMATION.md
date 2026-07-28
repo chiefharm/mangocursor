@@ -69,7 +69,7 @@ journalctl -u mango-pipeline.service -n 50
 
 ```env
 TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID
+TELEGRAM_CHAT_ID=...
 MANGO_VPBX_API_KEY=...
 MANGO_VPBX_API_SALT=...
 YANDEX_STT_ENABLED=1
@@ -79,9 +79,4 @@ YANDEX_FOLDER_ID=...
 
 ## Старые серверы (не использовать)
 
-| IP | Статус |
-|----|--------|
-| `YOUR_VPS_IP` | NL Qupra — инцидент Timeweb, недоступен |
-| `OLD_VPS_IP` | Москва — Telegram таймауты |
-
-Актуальный IP хранится в `deploy/vps.host` (не в git).
+IP старых VPS **не храним в git** — только актуальный в `deploy/vps.host` (локально).

@@ -83,4 +83,4 @@ Write-Step "Сохранение IP в deploy/vps.host"
 Set-Content -Path (Join-Path $PSScriptRoot "vps.host") -Value $VpsIp -Encoding utf8NoBOM
 
 Write-Host "`n[DONE] Новый VPS готов: $VpsIp" -ForegroundColor Green
-Write-Host "Обновите PROJECT_MEMORY.md (старый IP YOUR_VPS_IP -> $VpsIp) и закоммитьте deploy/*."
+Write-Host "Обновите PROJECT_MEMORY.md при смене VPS; IP сохранён только в deploy/vps.host (не коммитить)."

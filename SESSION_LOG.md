@@ -7,7 +7,7 @@
 
 ## Сессия 25.06 – 03.07.2026 (кратко)
 
-- QC-пайплайн Москва, Yandex STT, VPS `YOUR_VPS_IP`, формат Telegram, роли STT (позже отменены).
+- QC-пайплайн Москва, Yandex STT, VPS (IP в `deploy/vps.host`), формат Telegram, роли STT (позже отменены).
 - 25.06: отправлять только **16:44** (bad — справка без записи).
 - Timeweb Qupra сбой 01–03.07, VPS восстановлен.
 - Подробности — в git history / старые записи ниже.
@@ -55,7 +55,7 @@
 |---|--------|------------|
 | ЛС Mango | 16958477 | 16719904 |
 | API | старый `MANGO_VPBX_*` | `SITE_KRASNOYARSK_API_KEY/SALT` в `.env` |
-| Группа | YOUR_MOSCOW_GROUP_ID «звонки Москва Фили» | YOUR_KRASNOYARSK_GROUP_ID «Звонки soco красноярsk» |
+| Группа | `SITE_MOSCOW_GROUP_CHAT_IDS` | `SITE_KRASNOYARSK_GROUP_CHAT_IDS` |
 
 Код: `site_config.py`, `MANGO_SITES=moscow,krasnoyarsk`.
 
@@ -79,8 +79,8 @@ API Красноярска проверен 03.07: за день ~324 звонк
 1. Сначала: `TELEGRAM_EXTRA_CHAT_IDS` дублировал всё в одну группу.
 2. Ошибочно: Москва только личка, Красноярск только группа.
 3. **Финал (04.07, подтверждено владельцем):**
-   - **Москва** → личка `YOUR_TELEGRAM_CHAT_ID` + группа «Москва Фили»
-   - **Красноярск** → личка `YOUR_TELEGRAM_CHAT_ID` + группа «soco красноярsk»
+   - **Москва** → личка (`TELEGRAM_CHAT_ID`) + группа из `.env`
+   - **Красноярск** → личка + группа из `.env`
    - Без перекрёста между группами
 
 `telegram_notify.site_chat_ids(site)` — без `TELEGRAM_EXTRA_CHAT_IDS`.
@@ -132,8 +132,7 @@ API Красноярска проверен 03.07: за день ~324 звонк
 **Задача:** ежедневные отчёты выручки в Telegram (бот chiefharmcursor), без ПК.
 
 **Источники (live с Яндекс.Диска каждый запуск, без локального кэша):**
-- Красноярск: `https://disk.yandex.ru/i/YOUR_KRAS_LINK_ID`
-- Москва: `https://disk.yandex.ru/i/YOUR_MSK_LINK_ID`
+- Красноярск / Москва: ссылки `REVENUE_YADISK_KRAS` / `REVENUE_YADISK_MSK` только в `.env` на VPS
 
 **Формат:**
 - 3 сообщения Красноярск (Дубров / Новосиб / Весны) + 1 Москва (Фили)

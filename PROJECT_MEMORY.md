@@ -9,7 +9,7 @@
 
 Автоматизировать **контроль качества звонков** сети салонов **«SOCO / Сока»** (Mango Office).
 
-**Задача владельца (Егор, Telegram `@owner`, ID `YOUR_TELEGRAM_CHAT_ID`):**
+**Задача владельца (личка Telegram — `TELEGRAM_CHAT_ID` в `.env`, не в git):**
 1. Каждый день забирать звонки из Mango (два аккаунта: Москва + Красноярск)
 2. Расшифровывать (Yandex SpeechKit)
 3. **Отправлять в Telegram только косячные** + сомнительные
@@ -48,10 +48,10 @@
 
 Бот: **chiefharmcursor** (`TELEGRAM_BOT_TOKEN` в `.env`).
 
-| site | Личка Егора | Группа |
-|------|-------------|--------|
-| **moscow** | `YOUR_TELEGRAM_CHAT_ID` | **«звонки Москва Фили»** `YOUR_MOSCOW_GROUP_ID` |
-| **krasnoyarsk** | `YOUR_TELEGRAM_CHAT_ID` | **«Звонки soco красноярsk»** `YOUR_KRASNOYARSK_GROUP_ID` |
+| site | Личка | Группа |
+|------|-------|--------|
+| **moscow** | `TELEGRAM_CHAT_ID` | `SITE_MOSCOW_GROUP_CHAT_IDS` в `.env` |
+| **krasnoyarsk** | `TELEGRAM_CHAT_ID` | `SITE_KRASNOYARSK_GROUP_CHAT_IDS` в `.env` |
 
 - Каждый город → **своя** группа + **личка** (оба получают копию своего города).
 - **`TELEGRAM_EXTRA_CHAT_IDS` не использовать** — иначе группы смешиваются.
@@ -80,7 +80,7 @@
 расшифровка звонков SOCO Красноярск
 
 3 июля · 07:09
-входящий · 7400095342
+входящий · 7XXXXXXXXX
 Точка: Весны (доб. 25)
 Категория: …
 
@@ -134,9 +134,9 @@ Telegram: сводка + bad/uncertain + DOCX
 
 | Параметр | Значение |
 |----------|----------|
-| IP | `YOUR_VPS_IP` (`deploy/vps.host`) |
+| IP | только в `deploy/vps.host` (файл **не в git**, см. `deploy/vps.host.example`) |
 | Путь | `/opt/mango-pipeline` |
-| SSH | `ssh -i ~/.ssh/id_ed25519 root@YOUR_VPS_IP` |
+| SSH | `ssh -i ~/.ssh/id_ed25519 root@$(cat deploy/vps.host)` |
 | Таймер | **10:00 МСК** (`mango-pipeline.timer`, OnCalendar 07:00 UTC) |
 
 `daily_pipeline.py` обрабатывает **оба** site за один запуск; «вчера» считается по TZ каждого site.

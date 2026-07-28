@@ -13,7 +13,9 @@ $hostFile = Join-Path $PSScriptRoot "vps.host"
 if (-not $VpsIp -and (Test-Path $hostFile)) {
     $VpsIp = (Get-Content $hostFile -Raw).Trim()
 }
-if (-not $VpsIp) { $VpsIp = "YOUR_VPS_IP" }
+if (-not $VpsIp) {
+    throw "Задайте -VpsIp или создайте deploy/vps.host (см. deploy/vps.host.example)"
+}
 
 $Host_ = "root@$VpsIp"
 $Remote = "/opt/mango-pipeline"

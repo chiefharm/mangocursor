@@ -61,7 +61,7 @@ python daily_pipeline.py --mango-sync --dry-run
 В Mango → **Вебхуки** укажите URL:
 
 ```text
-http://OLD_VPS_IP:8787/?token=YOUR_TOKEN
+http://YOUR_VPS_IP:8787/?token=YOUR_TOKEN
 ```
 
 Настройте событие «завершение звонка» / «запись готова» и по возможности поля с текстом расшифровки.

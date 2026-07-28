@@ -1,7 +1,13 @@
 #!/bin/bash
+# Одноразовая настройка маршрутизации Telegram на VPS.
+# Перед запуском задайте ID групп (из getUpdates бота), не храните их в git:
+#   export SITE_MOSCOW_GROUP_CHAT_IDS='-100...'
+#   export SITE_KRASNOYARSK_GROUP_CHAT_IDS='-100...'
 set -e
-bash /root/set_env_var.sh /opt/mango-pipeline/.env SITE_MOSCOW_GROUP_CHAT_IDS 'YOUR_MOSCOW_GROUP_ID'
-bash /root/set_env_var.sh /opt/mango-pipeline/.env SITE_KRASNOYARSK_GROUP_CHAT_IDS 'YOUR_KRASNOYARSK_GROUP_ID'
+: "${SITE_MOSCOW_GROUP_CHAT_IDS:?Set SITE_MOSCOW_GROUP_CHAT_IDS}"
+: "${SITE_KRASNOYARSK_GROUP_CHAT_IDS:?Set SITE_KRASNOYARSK_GROUP_CHAT_IDS}"
+bash /root/set_env_var.sh /opt/mango-pipeline/.env SITE_MOSCOW_GROUP_CHAT_IDS "$SITE_MOSCOW_GROUP_CHAT_IDS"
+bash /root/set_env_var.sh /opt/mango-pipeline/.env SITE_KRASNOYARSK_GROUP_CHAT_IDS "$SITE_KRASNOYARSK_GROUP_CHAT_IDS"
 bash /root/set_env_var.sh /opt/mango-pipeline/.env SITE_MOSCOW_NOTIFY_OWNER 1
 bash /root/set_env_var.sh /opt/mango-pipeline/.env SITE_KRASNOYARSK_NOTIFY_OWNER 1
 bash /root/set_env_var.sh /opt/mango-pipeline/.env TELEGRAM_EXTRA_CHAT_IDS ''
