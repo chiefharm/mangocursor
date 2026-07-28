@@ -178,14 +178,9 @@ API Красноярска проверен 03.07: за день ~324 звонк
 - kie.ai — для экспериментов; продакшен → **Perfect Corp** (референс из портфолио)
 - Док: `docs/soco-salon-ai-tryon-session.md`, скрипт `tools/hair_tryon_test/run_comparison.py`
 
-### Аудит GitHub (PUBLIC репозиторий)
-- **API-ключи в git не найдены** — только placeholders в `.env.example`
-- **🔴 Утечка:** 56 HTML-расшифровок + `selected_calls.json` + `index.html` — телефоны и тексты звонков клиентов
-- Cloud-агенты (9 шт.) ключи не коммитили
-- **Исправлено:** файлы удалены, история git переписана (`git filter-repo`), отчёт `docs/SECURITY_AUDIT_2026-07-28.md`
-- VPS `.env` Cloud Agent **не проверил** (нет SSH) — проверить с ПК
-
-**Рекомендация:** сделать репозиторий **Private**.
+### Аудит GitHub — чувствительные данные убраны (28.07.2026)
+- Telegram ID, IP VPS, ссылки Я.Диск — только в `.env` / `deploy/vps.host` (не в git)
+- Отчёт: `docs/SECURITY_AUDIT_2026-07-28.md`
 
 ---
 
