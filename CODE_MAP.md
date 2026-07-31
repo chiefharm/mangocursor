@@ -84,10 +84,11 @@ build_call_message(..., site_label, branch)
 
 | Файл | Назначение |
 |------|------------|
-| `docs/soco-salon-ai-tryon-session.md` | Переписка 28.07.2026: Perfect Corp vs AILab, архитектура, TODO |
-| `tools/hair_tryon_test/run_comparison.py` | Тест API примерки (ключи в env, не в git) |
-| `docs/SECURITY_AUDIT_2026-07-28.md` | Аудит утечек на GitHub, инструкция проверки VPS |
+| `docs/soco-salon-ai-tryon-session.md` | Переписка: Perfect Corp vs AILab/GPT, архитектура |
+| `tools/hair_tryon_test/run_comparison.py` | Тест API примерки |
+| `tryon-web/` | **Веб-сервис YouCam**: «до» + до 3 референсов → «после» |
+| `docs/SECURITY_AUDIT_2026-07-28.md` | Аудит утечек на GitHub |
 
 ---
 
-*Обновлено: 2026-07-28*
+*Обновлено: 2026-07-31*
