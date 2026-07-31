@@ -182,6 +182,15 @@ API Красноярска проверен 03.07: за день ~324 звонк
 - Telegram ID, IP VPS, ссылки Я.Диск — только в `.env` / `deploy/vps.host` (не в git)
 - Отчёт: `docs/SECURITY_AUDIT_2026-07-28.md`
 
+### AI-примерка YouCam — веб-сервис (31.07.2026)
+- Сравнение GPT vs Perfect Corp: GPT плохо сохраняет лицо → выбран **Perfect Corp / YouCam**
+- Новый сервис: `tryon-web/` (FastAPI)
+  - фото «до» (файл / камера)
+  - до 3 референсов
+  - «после» = N вариантов
+- Деплой: `/opt/soco-tryon`, systemd `soco-tryon.service`, порт `8088`
+- Ключ: `PERFECTCORP_API_KEY` только в `.env`
+
 ---
 
-*Обновлено: 2026-07-28*
+*Обновлено: 2026-07-31*

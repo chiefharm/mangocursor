@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>SOCO — AI-примерка</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg"></div>
+  <main class="wrap">
+    <header class="hero">
+      <p class="brand">SOCO</p>
+      <h1>AI-примерка стрижки</h1>
+      <p class="lead">Загрузите своё фото, до 3 работ из портфолио — и посмотрите, как может выглядеть результат.</p>
+    </header>
+
+    <section class="panel" id="step-before">
+      <div class="panel-head">
+        <span class="step">1</span>
+        <div>
+          <h2>Фото «до»</h2>
+          <p>Анфас, хорошее освещение. Можно сфотографировать сейчас.</p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <label class="btn primary">
+          Загрузить фото
+          <input id="before-file" type="file" accept="image/*" hidden />
+        </label>
+        <button type="button" class="btn ghost" id="btn-camera">Сфотографировать</button>
+        <button type="button" class="btn ghost danger hidden" id="btn-clear-before">Убрать</button>
+      </div>
+
+      <div class="preview-box hidden" id="before-preview-wrap">
+        <img id="before-preview" alt="Фото до" />
+      </div>
+
+      <div class="camera-box hidden" id="camera-box">
+        <video id="camera-video" playsinline autoplay muted></video>
+        <div class="camera-actions">
+          <button type="button" class="btn primary" id="btn-snap">Снять</button>
+          <button type="button" class="btn ghost" id="btn-cancel-camera">Отмена</button>
+        </div>
+        <canvas id="camera-canvas" class="hidden"></canvas>
+      </div>
+    </section>
+
+    <section class="panel" id="step-refs">
+      <div class="panel-head">
+        <span class="step">2</span>
+        <div>
+          <h2>Референсы (до 3)</h2>
+          <p>Фото стрижек/окрашивания, которые хотите примерить.</p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <label class="btn primary">
+          Добавить референс
+          <input id="ref-file" type="file" accept="image/*" multiple hidden />
+        </label>
+      </div>
+
+      <div class="refs-grid" id="refs-grid"></div>
+      <p class="hint" id="refs-hint">Можно загрузить 1–3 фото.</p>
+    </section>
+
+    <section class="panel cta-panel">
+      <button type="button" class="btn primary wide" id="btn-run" disabled>Примерить</button>
+      <p class="hint center">AI-превью для вдохновения. Точный результат — после консультации в салоне.</p>
+      <div class="progress hidden" id="progress">
+        <div class="bar"><span></span></div>
+        <p id="progress-text">Готовим примерку…</p>
+      </div>
+      <p class="error hidden" id="error"></p>
+    </section>
+
+    <section class="panel hidden" id="step-after">
+      <div class="panel-head">
+        <span class="step">3</span>
+        <div>
+          <h2>Результат «после»</h2>
+          <p id="after-lead">Варианты по вашим референсам.</p>
+        </div>
+      </div>
+      <div class="compare" id="compare"></div>
+    </section>
+
+    <footer class="foot">
+      <p>SOCO · виртуальная примерка</p>
+    </footer>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
