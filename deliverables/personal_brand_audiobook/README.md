@@ -34,3 +34,11 @@ python3 generate_tts.py 00 01    # только выбранные
 ```
 
 > Оригинальный звук с YouTube с cloud IP недоступен (бот-проверка), поэтому озвучка синтетическая по расшифровке. Авторские права на контент — у правообладателя курса; это личная копия для удобства.
+
+
+## Русская версия
+
+- `chapters_ru/*.txt` — машинный перевод EN→RU
+- `How_to_Build_a_Personal_Brand_AUDIOBOOK_RU.docx` — рукопись
+- `generate_tts_ru.py` / `translate_ru.py` — пайплайн
+- Аудио (артефакты): `How_to_Build_a_Personal_Brand_AUDIOBOOK_RU.mp3` (~8 ч 25 мин, голос Dmitry)

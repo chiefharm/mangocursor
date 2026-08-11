@@ -1,3 +1,4 @@
 # Generated TTS audio is too large for git; kept in /opt/cursor/artifacts/
 audio_chapters/
+audio_chapters_ru/
 *.mp3
