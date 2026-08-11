@@ -11,7 +11,7 @@
 
 **Видео:** Caleb Ralston — *How to Build a Personal Brand (Full Course)* (~6 ч 19 мин).
 
-**Результат:** `deliverables/personal_brand_audiobook/` — DOCX + MD рукопись (32 главы), TTS MP3 (edge-tts). Оригинальный audio с YouTube с cloud IP недоступен.
+**Результат:** `deliverables/personal_brand_audiobook/` — DOCX + MD (32 главы, ~73k слов). Аудио: edge-tts Andrew, **6 ч 27 мин** — полный MP3 134 MB + lite 89 MB в `/opt/cursor/artifacts/personal_brand_audiobook/`. Оригинал YouTube audio с cloud IP недоступен.
 
 ---
 
