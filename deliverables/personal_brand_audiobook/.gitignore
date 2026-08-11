@@ -1,4 +1,3 @@
-# Ignore generated TTS audio (too large for git; kept in artifacts)
-deliverables/personal_brand_audiobook/audio_chapters/
-deliverables/personal_brand_audiobook/*.mp3
-deliverables/personal_brand_audiobook/**/*.mp3
+# Generated TTS audio is too large for git; kept in /opt/cursor/artifacts/
+audio_chapters/
+*.mp3

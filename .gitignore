@@ -35,3 +35,5 @@ index.html
 !tryon-web/static/index.html
 !tryon-web/**/*.html
 
+deliverables/personal_brand_audiobook/**/*.mp3
+deliverables/personal_brand_audiobook/audio_chapters/
