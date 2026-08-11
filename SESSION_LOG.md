@@ -5,6 +5,16 @@
 
 ---
 
+## Сессия 11.08.2026 — аудиокнига из YouTube
+
+**Запрос:** транскрибировать https://youtu.be/Ch4Sl0POBhU и собрать аудиокнигу.
+
+**Видео:** Caleb Ralston — *How to Build a Personal Brand (Full Course)* (~6 ч 19 мин).
+
+**Результат:** `deliverables/personal_brand_audiobook/` — DOCX + MD рукопись (32 главы), TTS MP3 (edge-tts). Оригинальный audio с YouTube с cloud IP недоступен.
+
+---
+
 ## Сессия 25.06 – 03.07.2026 (кратко)
 
 - QC-пайплайн Москва, Yandex STT, VPS (IP в `deploy/vps.host`), формат Telegram, роли STT (позже отменены).
