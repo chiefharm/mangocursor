@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate chapter MP3s via edge-tts, then concat into one audiobook."""
+"""Generate chapter MP3s via edge-tts (parallel), then concat into one audiobook."""
 from __future__ import annotations
 
 import asyncio
@@ -13,15 +13,15 @@ import edge_tts
 ROOT = Path(__file__).resolve().parent
 CHAP_DIR = ROOT / "chapters"
 AUDIO_DIR = ROOT / "audio_chapters"
-VOICE = "en-US-AndrewNeural"  # clear long-form male narration
-MAX_CHARS = 2800  # keep SSML/request payloads modest
+VOICE = "en-US-AndrewNeural"
+MAX_CHARS = 2800
+CONCURRENCY = 6  # parallel chapter/chunk jobs
 
 
 def chunk_text(text: str, max_chars: int = MAX_CHARS) -> list[str]:
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) <= max_chars:
         return [text]
-    # Split on paragraph / sentence boundaries
     parts: list[str] = []
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     buf = ""
@@ -39,7 +39,6 @@ def chunk_text(text: str, max_chars: int = MAX_CHARS) -> list[str]:
                 if len(sent) <= max_chars:
                     buf = sent
                 else:
-                    # hard wrap very long sentences
                     for i in range(0, len(sent), max_chars):
                         parts.append(sent[i : i + max_chars])
                     buf = ""
@@ -51,38 +50,44 @@ def chunk_text(text: str, max_chars: int = MAX_CHARS) -> list[str]:
     return parts
 
 
-async def synth_chunk(text: str, out_path: Path) -> None:
-    communicate = edge_tts.Communicate(text, VOICE, rate="-5%")
-    await communicate.save(str(out_path))
+async def synth_chunk(text: str, out_path: Path, sem: asyncio.Semaphore) -> None:
+    async with sem:
+        if out_path.exists() and out_path.stat().st_size > 1000:
+            return
+        for attempt in range(4):
+            try:
+                communicate = edge_tts.Communicate(text, VOICE, rate="-5%")
+                await communicate.save(str(out_path))
+                if out_path.stat().st_size > 500:
+                    return
+            except Exception as e:
+                print(f"    retry {out_path.name} {attempt+1}: {e}", flush=True)
+                await asyncio.sleep(2 * (attempt + 1))
+        raise RuntimeError(f"Failed TTS for {out_path}")
 
 
-async def synth_chapter(txt_path: Path, out_mp3: Path) -> None:
+async def synth_chapter(txt_path: Path, out_mp3: Path, sem: asyncio.Semaphore) -> None:
+    if out_mp3.exists() and out_mp3.stat().st_size > 5000:
+        print(f"SKIP existing {out_mp3.name}", flush=True)
+        return
+
     raw = txt_path.read_text(encoding="utf-8")
     chunks = chunk_text(raw)
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_files: list[Path] = []
-    for i, chunk in enumerate(chunks):
-        tmp = AUDIO_DIR / f"{txt_path.stem}_part{i:03d}.mp3"
-        if tmp.exists() and tmp.stat().st_size > 1000:
-            tmp_files.append(tmp)
-            continue
-        print(f"  TTS {txt_path.stem} part {i+1}/{len(chunks)} ({len(chunk)} chars)", flush=True)
-        for attempt in range(3):
-            try:
-                await synth_chunk(chunk, tmp)
-                break
-            except Exception as e:
-                print(f"    retry {attempt+1}: {e}", flush=True)
-                await asyncio.sleep(2 * (attempt + 1))
-        else:
-            raise RuntimeError(f"Failed TTS for {txt_path} part {i}")
-        tmp_files.append(tmp)
+    tmp_files = [AUDIO_DIR / f"{txt_path.stem}_part{i:03d}.mp3" for i in range(len(chunks))]
+
+    print(f"CHAPTER {txt_path.name} ({len(chunks)} parts)", flush=True)
+    await asyncio.gather(
+        *[synth_chunk(chunk, tmp, sem) for chunk, tmp in zip(chunks, tmp_files)]
+    )
 
     if len(tmp_files) == 1:
-        tmp_files[0].replace(out_mp3)
+        # copy rather than replace to avoid cross-device issues
+        data = tmp_files[0].read_bytes()
+        out_mp3.write_bytes(data)
+        tmp_files[0].unlink(missing_ok=True)
         return
 
-    # concat with ffmpeg
     list_file = AUDIO_DIR / f"{txt_path.stem}_concat.txt"
     list_file.write_text(
         "".join(f"file '{p.resolve()}'\n" for p in tmp_files), encoding="utf-8"
@@ -107,6 +112,7 @@ async def synth_chapter(txt_path: Path, out_mp3: Path) -> None:
     list_file.unlink(missing_ok=True)
     for p in tmp_files:
         p.unlink(missing_ok=True)
+    print(f"  OK {out_mp3.name} ({out_mp3.stat().st_size} bytes)", flush=True)
 
 
 async def main(only: list[str] | None = None) -> None:
@@ -114,17 +120,20 @@ async def main(only: list[str] | None = None) -> None:
     files = sorted(CHAP_DIR.glob("*.txt"))
     if only:
         files = [f for f in files if f.stem in only]
-    chapter_mp3s: list[Path] = []
-    for f in files:
-        out_mp3 = AUDIO_DIR / f"{f.stem}.mp3"
-        if out_mp3.exists() and out_mp3.stat().st_size > 5000:
-            print(f"SKIP existing {out_mp3.name}", flush=True)
-        else:
-            print(f"CHAPTER {f.name}", flush=True)
-            await synth_chapter(f, out_mp3)
-        chapter_mp3s.append(out_mp3)
 
-    # Full audiobook concat
+    sem = asyncio.Semaphore(CONCURRENCY)
+    # Process chapters with limited concurrency (each chapter fans out parts)
+    chapter_sem = asyncio.Semaphore(3)
+
+    async def run_one(f: Path) -> Path:
+        async with chapter_sem:
+            out_mp3 = AUDIO_DIR / f"{f.stem}.mp3"
+            await synth_chapter(f, out_mp3, sem)
+            return out_mp3
+
+    chapter_mp3s = await asyncio.gather(*[run_one(f) for f in files])
+    chapter_mp3s = sorted(chapter_mp3s, key=lambda p: p.name)
+
     full = ROOT / "How_to_Build_a_Personal_Brand_AUDIOBOOK.mp3"
     list_file = AUDIO_DIR / "_full_concat.txt"
     list_file.write_text(
@@ -148,7 +157,17 @@ async def main(only: list[str] | None = None) -> None:
         check=True,
         capture_output=True,
     )
+    # Also copy to artifacts
+    art = Path("/opt/cursor/artifacts/personal_brand_audiobook")
+    art.mkdir(parents=True, exist_ok=True)
+    art_full = art / full.name
+    art_full.write_bytes(full.read_bytes())
+    # copy docx too
+    docx = ROOT / "How_to_Build_a_Personal_Brand_AUDIOBOOK.docx"
+    if docx.exists():
+        (art / docx.name).write_bytes(docx.read_bytes())
     print(f"DONE {full} ({full.stat().st_size} bytes)", flush=True)
+    print(f"ARTIFACT {art_full}", flush=True)
 
 
 if __name__ == "__main__":
