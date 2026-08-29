@@ -63,7 +63,15 @@ TRANSFER_CATEGORY_MARKERS = (
     "transfer",
 )
 EMPTY_CATEGORY_MARKERS = ("", "другое", "прочее", "без категории", "n/a", "na", "none", "-")
-OWN_ACCOUNT_MARKERS = ("между своими", "на свою", "свой счет", "свой счёт", "own account")
+OWN_ACCOUNT_MARKERS = (
+    "между своими",
+    "на свою",
+    "свой счет",
+    "свой счёт",
+    "own account",
+    "копилка",
+    "внутрибанковский перевод между счетами",
+)
 
 _DATE_FORMATS = (
     "%d.%m.%Y %H:%M:%S",
@@ -105,6 +113,10 @@ class ParseError(ValueError):
 def parse_statement(path: str | Path, *, filename: str | None = None) -> list[ParsedTx]:
     path = Path(path)
     name = (filename or path.name).lower()
+    if name.endswith(".pdf"):
+        from .parse_pdf import parse_pdf_statement
+
+        return parse_pdf_statement(path, filename=filename or path.name)
     if name.endswith(".xlsx") or name.endswith(".xls"):
         rows = _read_xlsx_rows(path)
     else:
@@ -150,7 +162,7 @@ def classify_review(category: str, description: str, amount: float) -> tuple[boo
     empty_cat = cat in EMPTY_CATEGORY_MARKERS
 
     if is_own:
-        return True, "transfer", True
+        return False, "transfer", True
     if is_transfer or empty_cat:
         kind = "income" if amount > 0 else "expense"
         if is_transfer:
@@ -352,7 +364,7 @@ def parse_amount(value: object) -> float | None:
     if not s:
         return None
     s = s.replace("\xa0", " ").replace(" ", "")
-    s = re.sub(r"[₽€$]|руб\.?|RUB|USD|EUR", "", s, flags=re.I)
+    s = re.sub(r"[₽€$]|руб\.?|RUB|RUR|USD|EUR", "", s, flags=re.I)
     s = s.strip()
     neg = s.startswith("(") and s.endswith(")")
     s = s.strip("()")

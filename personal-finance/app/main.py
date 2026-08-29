@@ -34,7 +34,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
-ALLOWED_SUFFIX = {".csv", ".xlsx", ".xls", ".txt"}
+ALLOWED_SUFFIX = {".csv", ".xlsx", ".xls", ".txt", ".pdf"}
 COOKIE_NAME = "pf_session"
 COOKIE_DAYS = 30
 
@@ -99,6 +99,15 @@ def _auth_off() -> bool:
 
 def _demo() -> bool:
     return os.getenv("FINANCE_DEMO", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _drive_on() -> bool:
+    raw = os.getenv("FINANCE_DRIVE_ENABLED", "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    return not _demo()
 
 
 def _sign(payload: str) -> str:
@@ -167,6 +176,7 @@ async def me(request: Request) -> dict:
         "review_count": store.review_count() if _is_authed(request) else 0,
         "telegram": tg.telegram_enabled(),
         "demo": _demo(),
+        "drive": _drive_on(),
     }
 
 
@@ -203,7 +213,7 @@ async def import_statement(file: UploadFile = File(...)) -> dict:
     filename = file.filename or "statement.csv"
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_SUFFIX:
-        raise HTTPException(status_code=400, detail="Нужен файл CSV или Excel (.xlsx)")
+        raise HTTPException(status_code=400, detail="Нужен файл CSV, Excel или PDF")
     dest = UPLOAD_DIR / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{_safe_name(filename)}"
     size = 0
     with dest.open("wb") as out:
@@ -264,6 +274,23 @@ async def import_statement(file: UploadFile = File(...)) -> dict:
         "telegram_sent": telegram_sent,
         "telegram_kind": telegram_kind,
         "telegram_error": telegram_error,
+    }
+
+
+@app.post("/api/pull-drive")
+async def pull_drive() -> dict:
+    if not _drive_on():
+        raise HTTPException(status_code=400, detail="Папка Google Drive выключена")
+    from .pull import month_of, pull_statements
+
+    result = pull_statements(store, dest_dir=UPLOAD_DIR)
+    newest = result.get("newest") or {}
+    ym = month_of(newest.get("period_to"))
+    return {
+        "ok": True,
+        **result,
+        "year": ym[0] if ym else None,
+        "month": ym[1] if ym else None,
     }
 
 

@@ -18,7 +18,7 @@ def test_import_dedup_and_review_queue(tmp_path: Path) -> None:
     txs = parse_statement(_write(TINKOFF))
     first = store.import_transactions(txs, "ops.csv")
     assert first.new_count == 5
-    assert first.review_count == 2
+    assert first.review_count == 1
     again = store.import_transactions(txs, "ops.csv")
     assert again.new_count == 0
     assert again.dup_count == 5
@@ -32,15 +32,12 @@ def test_unreviewed_not_in_pnl_until_explained(tmp_path: Path) -> None:
     assert summary["income"] == 150000
     # supermarket 1250.50 + coffee 890; transfers held aside
     assert summary["expense"] == 2140.5
-    assert summary["unreviewed_count"] == 2
-    assert summary["unreviewed_sum"] == -70000
+    assert summary["unreviewed_count"] == 1
+    assert summary["unreviewed_sum"] == -50000
+    assert summary["internal"] == -20000
 
     pending = store.list_transactions(needs_review=True)
-    own = next(t for t in pending if "накопительн" in t["description"].lower())
-    store.review_transaction(
-        own["id"], kind="transfer", user_note="на копилку", is_internal=True
-    )
-    p2p = next(t for t in pending if t["id"] != own["id"])
+    p2p = pending[0]
     store.review_transaction(
         p2p["id"],
         kind="expense",

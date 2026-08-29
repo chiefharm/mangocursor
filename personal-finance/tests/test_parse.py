@@ -52,7 +52,7 @@ def test_tinkoff_uses_bank_categories_and_flags_transfers() -> None:
     assert p2p.suggested_internal is False
 
     own = by_desc["На накопительный"]
-    assert own.needs_review is True
+    assert own.needs_review is False
     assert own.suggested_internal is True
 
 

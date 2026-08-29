@@ -76,11 +76,12 @@ if [[ ! -f "$DEST/.env" ]]; then
   if [[ -n "$TOKEN" ]]; then
     TG_ON=1
   fi
-  cat > "$DEST/.env" <<EOF
+    cat > "$DEST/.env" <<EOF
 FINANCE_PASSWORD=$PASS
 FINANCE_PORT=$PORT
 FINANCE_TELEGRAM_ENABLED=$TG_ON
 FINANCE_TELEGRAM_BOT_TOKEN=$TOKEN
+FINANCE_DRIVE_FOLDER=https://drive.google.com/drive/folders/1VIxQOYkI8T5kGaO8EuzJEduuQBnLyRgj
 EOF
   chmod 600 "$DEST/.env"
   umask 077
@@ -89,6 +90,9 @@ EOF
 else
   PASS=""
   echo "==> keep existing $DEST/.env"
+  if ! grep -qE '^FINANCE_DRIVE_FOLDER=' "$DEST/.env"; then
+    echo "FINANCE_DRIVE_FOLDER=https://drive.google.com/drive/folders/1VIxQOYkI8T5kGaO8EuzJEduuQBnLyRgj" >> "$DEST/.env"
+  fi
 fi
 
 sed -i 's/\r$//' "$DEST/deploy/personal-finance.service" "$DEST/deploy/personal-finance-bot.service" || true

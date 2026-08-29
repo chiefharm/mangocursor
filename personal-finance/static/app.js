@@ -131,12 +131,13 @@ function homeView() {
       </section>
       <section class="card">
         <h2>Загрузить выписку</h2>
+        ${state.me.drive ? `<button class="primary" id="pull-drive" style="width:100%;margin-bottom:12px">Забрать с Google Drive</button>` : ""}
         <label class="drop" id="drop">
           <strong>Вложить выписку</strong>
-          <p>CSV или Excel — Тинькофф, Сбер, Альфа</p>
-          <input id="file" type="file" accept=".csv,.xlsx,.xls,.txt" />
+          <p>PDF, CSV или Excel — Альфа, Тинькофф, Сбер</p>
+          <input id="file" type="file" accept=".pdf,.csv,.xlsx,.xls,.txt" />
         </label>
-        <p class="hint">Переводы между счетами обычно без статьи. После загрузки откроется очередь: куда ушли деньги или «между своими».</p>
+        <p class="hint">Имя файла не важно — даты беру из операций внутри. Новые строки добавятся, старые не задвоятся. Переводы без статьи откроются в очереди.</p>
         <div class="error" id="upload-error" hidden></div>
       </section>
       <section class="card">
@@ -338,6 +339,7 @@ function bindHome() {
     if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
   });
   file?.addEventListener("change", () => { if (file.files[0]) upload(file.files[0]); });
+  $("#pull-drive")?.addEventListener("click", pullDrive);
 }
 
 function bindReview() {
@@ -406,6 +408,45 @@ function bindReview() {
       box.textContent = err.message || "Не сохранилось";
     }
   });
+}
+
+async function pullDrive() {
+  const errBox = $("#upload-error");
+  const btn = $("#pull-drive");
+  if (btn) btn.disabled = true;
+  if (errBox) errBox.hidden = true;
+  try {
+    const res = await api("/api/pull-drive", { method: "POST" });
+    const n = res.new_count ?? 0;
+    const dups = res.dup_count ?? 0;
+    const newest = res.newest || {};
+    state.notice = n
+      ? `С Диска: +${n} операций` + (dups ? `, уже были: ${dups}` : "")
+      : dups
+        ? "На Диске нет новых операций — эти даты уже в кассе"
+        : "В папке пока нет выписок";
+    if (newest.period_to) {
+      const [y, m] = newest.period_to.split("-");
+      state.year = Number(y);
+      state.month = Number(m);
+    } else if (res.year && res.month) {
+      state.year = res.year;
+      state.month = res.month;
+    }
+    if (res.review_count) {
+      state.view = "review";
+      await loadReview();
+      return;
+    }
+    await loadSummary();
+  } catch (err) {
+    if (errBox) {
+      errBox.hidden = false;
+      errBox.textContent = err.data?.detail || err.message || "Не удалось забрать с Диска";
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function upload(file) {

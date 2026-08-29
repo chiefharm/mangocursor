@@ -34,13 +34,13 @@ def test_upload_and_review_transfer(client: TestClient) -> None:
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["import"]["new_count"] == 5
-    assert body["import"]["review_count"] == 2
-    assert body["summary"]["unreviewed_count"] == 2
+    assert body["import"]["review_count"] == 1
+    assert body["summary"]["unreviewed_count"] == 1
 
     queue = client.get("/api/review").json()
-    assert queue["count"] == 2
-    p2p = next(t for t in queue["transactions"] if "2222" in t["description"])
-    own = next(t for t in queue["transactions"] if t["id"] != p2p["id"])
+    assert queue["count"] == 1
+    p2p = queue["transactions"][0]
+    assert "2222" in p2p["description"]
 
     saved = client.post(
         f"/api/transactions/{p2p['id']}/review",
@@ -52,16 +52,7 @@ def test_upload_and_review_transfer(client: TestClient) -> None:
         },
     )
     assert saved.status_code == 200
-    assert saved.json()["review_count"] == 1
-
-    client.post(
-        f"/api/transactions/{own['id']}/review",
-        json={
-            "kind": "transfer",
-            "user_note": "на накопительный",
-            "is_internal": True,
-        },
-    )
+    assert saved.json()["review_count"] == 0
     summary = client.get("/api/summary?year=2026&month=8").json()
     assert summary["summary"]["unreviewed_count"] == 0
     names = {c["name"] for c in summary["summary"]["expense_by_category"]}
