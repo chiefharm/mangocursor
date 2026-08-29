@@ -236,6 +236,13 @@ Cron: `0 5 * * *` (Europe/Moscow) → `deploy/install_revenue_cron.sh`
 - Yandex STT склеивает реплики → ответ админа может быть в одной строке с клиентом
 - ~30 записей/день Красноярск могут не расшифроваться (короткие / лимиты Yandex)
 
+## Cursor Cloud
+
+- Репозиторий и тесты работают в Cloud Agent без продакшен-секретов.
+- Зависимости: корневой `requirements.txt` + `personal-finance/requirements.txt`.
+- `.env`, `deploy/vps.host`, SSH-ключи и данные звонков в облачный git не переносятся.
+- Реальные Telegram/Mango/Yandex операции по-прежнему выполняются только с VPS.
+
 ---
 
 ## Личные финансы (не салон)
