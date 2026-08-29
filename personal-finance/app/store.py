@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .parse import ParsedTx
+from .parse import ParsedTx, StatementMeta
 
 UNLABELED_CATEGORY = "Переводы без разметки"
 INCOME_CATEGORY = "Доходы"
@@ -65,6 +66,24 @@ CREATE TABLE IF NOT EXISTS category_stance (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS statement_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    period_from TEXT,
+    period_to TEXT,
+    stmt_income REAL,
+    stmt_expense REAL,
+    stmt_unconfirmed REAL,
+    stmt_opening REAL,
+    stmt_closing REAL,
+    from_header INTEGER NOT NULL DEFAULT 0,
+    book_income REAL,
+    book_expense REAL,
+    book_holds REAL,
+    matched INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS digests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -79,7 +98,8 @@ def tx_is_hold(tx: ParsedTx) -> bool:
     return (tx.status or "").lower() == "hold" or bool((tx.extra or {}).get("hold"))
 
 
-def tx_uid(tx: ParsedTx) -> str:
+def tx_uid(tx: ParsedTx, *, legacy: bool = False) -> str:
+    extra = tx.extra or {}
     parts = [
         tx.posted_at.strftime("%Y-%m-%d %H:%M:%S"),
         f"{tx.amount:.2f}",
@@ -90,7 +110,52 @@ def tx_uid(tx: ParsedTx) -> str:
     ]
     if tx_is_hold(tx):
         parts.append("hold")
+    if not legacy:
+        parts.append(str(extra.get("code") or ""))
+        if tx_is_hold(tx):
+            parts.append(str(extra.get("raw") or "")[:80])
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+_STOP_WORDS = {
+    "hold",
+    "online",
+    "moscow",
+    "moskva",
+    "sankt",
+    "peterbu",
+    "krasnoyarsk",
+    "operation",
+    "операция",
+    "операции",
+    "неподтвержденная",
+    "sber",
+    "карта",
+    "карте",
+    "сумму",
+    "дата",
+    "совершения",
+    "место",
+    "для",
+    "без",
+    "ндс",
+    "руб",
+    "rur",
+}
+
+
+def _op_tokens(*parts: str) -> set[str]:
+    blob = " ".join(p for p in parts if p).lower().replace("ё", "е")
+    blob = blob.replace("tsum", "цум").replace("samokat", "самокат")
+    blob = blob.replace("pyaterochka", "пятерочка").replace("litres", "литрес")
+    words = re.findall(r"[a-zа-я]{3,}", blob)
+    return {w for w in words if w not in _STOP_WORDS}
+
+
+def _same_purchase(tx: ParsedTx, row: sqlite3.Row | dict[str, Any]) -> bool:
+    want = _op_tokens(tx.description)
+    got = _op_tokens(str(row["description"] or ""))
+    return bool(want and got and want & got)
 
 
 def _amount_date_clause(holds: bool) -> str:
@@ -108,24 +173,152 @@ def _hold_window(posted: date) -> tuple[str, str]:
     return (posted - timedelta(days=3)).isoformat(), (posted + timedelta(days=3)).isoformat()
 
 
-def _find_amount_neighbors(
-    conn: sqlite3.Connection, amount: float, posted: date, *, holds: bool
+def _find_matching_neighbors(
+    conn: sqlite3.Connection, tx: ParsedTx, *, holds: bool
 ) -> list[sqlite3.Row]:
-    date_from, date_to = _hold_window(posted)
-    return conn.execute(
-        f"SELECT id FROM transactions WHERE {_amount_date_clause(holds)}",
-        (amount, date_from, date_to),
+    date_from, date_to = _hold_window(tx.posted_date)
+    rows = conn.execute(
+        f"SELECT * FROM transactions WHERE {_amount_date_clause(holds)}",
+        (tx.amount, date_from, date_to),
     ).fetchall()
+    return [row for row in rows if _same_purchase(tx, row)]
 
 
-def _delete_amount_neighbors(
-    conn: sqlite3.Connection, amount: float, posted: date, *, holds: bool
+def _delete_matching_neighbors(conn: sqlite3.Connection, tx: ParsedTx, *, holds: bool) -> None:
+    for row in _find_matching_neighbors(conn, tx, holds=holds):
+        conn.execute("DELETE FROM transactions WHERE id = ?", (row["id"],))
+
+
+def _lookup_existing(conn: sqlite3.Connection, tx: ParsedTx) -> sqlite3.Row | None:
+    for legacy in (False, True):
+        row = conn.execute(
+            "SELECT * FROM transactions WHERE uid = ?", (tx_uid(tx, legacy=legacy),)
+        ).fetchone()
+        if row:
+            return row
+    return None
+
+
+def _refresh_existing(
+    conn: sqlite3.Connection, row: sqlite3.Row, tx: ParsedTx, uid: str
 ) -> None:
-    date_from, date_to = _hold_window(posted)
-    conn.execute(
-        f"DELETE FROM transactions WHERE {_amount_date_clause(holds)}",
-        (amount, date_from, date_to),
+    locked = bool((row["user_category"] or "").strip())
+    extra_json = json.dumps(tx.extra or {}, ensure_ascii=False)
+    in_queue = int(row["needs_review"] or 0) == 1
+    kind = tx.suggested_kind if in_queue else (row["kind"] or tx.suggested_kind)
+    internal = (
+        (1 if tx.suggested_internal else 0)
+        if in_queue
+        else int(row["is_internal"] or 0)
     )
+    bank_category = row["bank_category"] if locked else (tx.category or row["bank_category"])
+    description = tx.description or row["description"]
+    conn.execute(
+        """
+        UPDATE transactions SET
+            uid = ?, bank_category = ?, description = ?, mcc = ?, card = ?,
+            status = ?, kind = ?, is_internal = ?, extra = ?
+        WHERE id = ?
+        """,
+        (
+            uid,
+            bank_category,
+            description,
+            tx.mcc or row["mcc"],
+            tx.card or row["card"],
+            tx.status,
+            kind,
+            internal,
+            extra_json,
+            row["id"],
+        ),
+    )
+
+
+def _money_close(a: float | None, b: float | None) -> bool:
+    if a is None or b is None:
+        return False
+    return abs(float(a) - float(b)) < 0.051
+
+
+def _write_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    filename: str,
+    imported_at: str,
+    period_from: str | None,
+    period_to: str | None,
+    meta: StatementMeta | None,
+) -> dict[str, Any] | None:
+    if not period_from or not period_to:
+        return None
+    book = conn.execute(
+        """
+        SELECT
+            ROUND(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 2) AS income,
+            ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS expense,
+            ROUND(SUM(CASE WHEN amount < 0 AND LOWER(COALESCE(status,'')) = 'hold'
+                           THEN -amount ELSE 0 END), 2) AS holds
+        FROM transactions
+        WHERE posted_date >= ? AND posted_date <= ?
+        """,
+        (period_from, period_to),
+    ).fetchone()
+    book_income = float(book["income"] or 0)
+    book_expense = float(book["expense"] or 0)
+    book_holds = float(book["holds"] or 0)
+    stmt_income = meta.income if meta else None
+    stmt_expense = meta.expense if meta else None
+    stmt_unconfirmed = meta.unconfirmed if meta else None
+    matched = _money_close(stmt_income, book_income) and _money_close(
+        stmt_expense, book_expense
+    )
+    conn.execute(
+        """
+        INSERT INTO statement_snapshots (
+            filename, imported_at, period_from, period_to,
+            stmt_income, stmt_expense, stmt_unconfirmed, stmt_opening, stmt_closing,
+            from_header, book_income, book_expense, book_holds, matched
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            filename,
+            imported_at,
+            period_from,
+            period_to,
+            stmt_income,
+            stmt_expense,
+            stmt_unconfirmed,
+            meta.opening if meta else None,
+            meta.closing if meta else None,
+            1 if meta and meta.from_header else 0,
+            book_income,
+            book_expense,
+            book_holds,
+            1 if matched else 0,
+        ),
+    )
+    return {
+        "period_from": period_from,
+        "period_to": period_to,
+        "filename": filename,
+        "from_header": bool(meta and meta.from_header),
+        "stmt_income": stmt_income,
+        "stmt_expense": stmt_expense,
+        "stmt_unconfirmed": stmt_unconfirmed,
+        "book_income": book_income,
+        "book_expense": book_expense,
+        "book_holds": book_holds,
+        "income_ok": _money_close(stmt_income, book_income),
+        "expense_ok": _money_close(stmt_expense, book_expense),
+        "matched": matched,
+        "income_delta": round(book_income - float(stmt_income or 0), 2)
+        if stmt_income is not None
+        else None,
+        "expense_delta": round(book_expense - float(stmt_expense or 0), 2)
+        if stmt_expense is not None
+        else None,
+    }
 
 
 @dataclass
@@ -138,6 +331,8 @@ class ImportResult:
     period_from: str | None
     period_to: str | None
     new_ids: list[int]
+    refreshed_count: int = 0
+    reconcile: dict[str, Any] | None = None
 
 
 class FinanceStore:
@@ -157,14 +352,24 @@ class FinanceStore:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
 
-    def import_transactions(self, txs: list[ParsedTx], filename: str) -> ImportResult:
+    def import_transactions(
+        self,
+        txs: list[ParsedTx],
+        filename: str,
+        meta: StatementMeta | None = None,
+    ) -> ImportResult:
         now = datetime.now().isoformat(timespec="seconds")
         dates = [tx.posted_date.isoformat() for tx in txs]
-        period_from = min(dates) if dates else None
-        period_to = max(dates) if dates else None
+        period_from = (meta.period_from if meta and meta.period_from else None) or (
+            min(dates) if dates else None
+        )
+        period_to = (meta.period_to if meta and meta.period_to else None) or (
+            max(dates) if dates else None
+        )
         new_ids: list[int] = []
         new_count = 0
         dup_count = 0
+        refreshed_count = 0
         review_count = 0
 
         with self.connect() as conn:
@@ -178,21 +383,17 @@ class FinanceStore:
             import_id = int(cur.lastrowid)
             for tx in txs:
                 uid = tx_uid(tx)
-                existing = conn.execute(
-                    "SELECT id FROM transactions WHERE uid = ?", (uid,)
-                ).fetchone()
+                existing = _lookup_existing(conn, tx)
                 if existing:
+                    _refresh_existing(conn, existing, tx, uid)
                     dup_count += 1
+                    refreshed_count += 1
                     continue
-                if tx_is_hold(tx) and _find_amount_neighbors(
-                    conn, tx.amount, tx.posted_date, holds=False
-                ):
+                if tx_is_hold(tx) and _find_matching_neighbors(conn, tx, holds=False):
                     dup_count += 1
                     continue
                 if not tx_is_hold(tx):
-                    _delete_amount_neighbors(
-                        conn, tx.amount, tx.posted_date, holds=True
-                    )
+                    _delete_matching_neighbors(conn, tx, holds=True)
                 kind = tx.suggested_kind
                 is_internal = 1 if tx.suggested_internal else 0
                 needs = 1 if tx.needs_review else 0
@@ -235,6 +436,14 @@ class FinanceStore:
                 """,
                 (new_count, dup_count, review_count, import_id),
             )
+            reconcile = _write_snapshot(
+                conn,
+                filename=filename,
+                imported_at=now,
+                period_from=period_from,
+                period_to=period_to,
+                meta=meta,
+            )
         return ImportResult(
             import_id=import_id,
             filename=filename,
@@ -244,6 +453,8 @@ class FinanceStore:
             period_from=period_from,
             period_to=period_to,
             new_ids=new_ids,
+            refreshed_count=refreshed_count,
+            reconcile=reconcile,
         )
 
     def list_imports(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -440,7 +651,49 @@ class FinanceStore:
                 (date_from, date_to),
             ).fetchall()
         txs = [dict(r) for r in rows]
-        return summarize_rows(txs, date_from, date_to)
+        out = summarize_rows(txs, date_from, date_to)
+        snap = self.latest_snapshot(date_from, date_to)
+        if snap:
+            out["reconcile"] = snap
+        return out
+
+    def latest_snapshot(self, date_from: str, date_to: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM statement_snapshots
+                WHERE period_from <= ? AND period_to >= ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (date_to, date_from),
+            ).fetchone()
+        if not row:
+            return None
+        stmt_income = row["stmt_income"]
+        stmt_expense = row["stmt_expense"]
+        book_income = float(row["book_income"] or 0)
+        book_expense = float(row["book_expense"] or 0)
+        return {
+            "period_from": row["period_from"],
+            "period_to": row["period_to"],
+            "filename": row["filename"],
+            "from_header": bool(row["from_header"]),
+            "stmt_income": stmt_income,
+            "stmt_expense": stmt_expense,
+            "stmt_unconfirmed": row["stmt_unconfirmed"],
+            "book_income": book_income,
+            "book_expense": book_expense,
+            "book_holds": float(row["book_holds"] or 0),
+            "income_ok": _money_close(stmt_income, book_income),
+            "expense_ok": _money_close(stmt_expense, book_expense),
+            "matched": bool(row["matched"]),
+            "income_delta": round(book_income - float(stmt_income or 0), 2)
+            if stmt_income is not None
+            else None,
+            "expense_delta": round(book_expense - float(stmt_expense or 0), 2)
+            if stmt_expense is not None
+            else None,
+        }
 
     def previous_period(self, date_from: str, date_to: str) -> tuple[str, str]:
         start = date.fromisoformat(date_from)
@@ -599,12 +852,13 @@ def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> d
         if cat == UNLABELED_CATEGORY:
             unlabeled.append(public_tx(row))
             unlabeled_sum += amount
-            continue
         if bucket == "income":
             income_cats[cat] = income_cats.get(cat, 0.0) + abs(amount)
         else:
             expense_cats[cat] = expense_cats.get(cat, 0.0) + abs(amount)
 
+    income_bars = round(sum(income_cats.values()), 2)
+    expense_bars = round(sum(expense_cats.values()), 2)
     return {
         "period": {"from": date_from, "to": date_to},
         "income": round(income, 2),
@@ -620,6 +874,7 @@ def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> d
         "unlabeled_sum": round(unlabeled_sum, 2),
         "unlabeled": unlabeled,
         "tx_count": len(txs),
+        "bars_ok": _money_close(income_bars, income) and _money_close(expense_bars, expense),
     }
 
 

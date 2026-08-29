@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .parse import ParseError, parse_statement
+from .parse import ParseError, parse_statement_with_meta
 from .report import month_title
 from .store import FinanceStore, public_tx, INCOME_CATEGORY, UNLABELED_CATEGORY
 from .advice import build_digest
@@ -227,8 +227,8 @@ async def import_statement(file: UploadFile = File(...)) -> dict:
         dest.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="Пустой файл")
     try:
-        txs = parse_statement(dest, filename=filename)
-        result = store.import_transactions(txs, filename)
+        txs, meta = parse_statement_with_meta(dest, filename=filename)
+        result = store.import_transactions(txs, filename, meta=meta)
     except ParseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -266,6 +266,8 @@ async def import_statement(file: UploadFile = File(...)) -> dict:
             "review_count": result.review_count,
             "period_from": result.period_from,
             "period_to": result.period_to,
+            "refreshed_count": result.refreshed_count,
+            "reconcile": result.reconcile,
         },
         "summary": summary,
         "telegram_sent": telegram_sent,

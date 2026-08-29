@@ -25,7 +25,7 @@ def test_import_dedup_and_review_queue(tmp_path: Path) -> None:
     assert again.dup_count == 5
 
 
-def test_posted_uid_stays_compatible_without_hold_suffix() -> None:
+def test_posted_uid_keeps_legacy_lookup() -> None:
     import hashlib
 
     txs = parse_statement(_write(TINKOFF))
@@ -40,8 +40,8 @@ def test_posted_uid_stays_compatible_without_hold_suffix() -> None:
             food.category,
         ]
     )
-    assert tx_uid(food) == hashlib.sha256(legacy.encode("utf-8")).hexdigest()
-    assert not tx_uid(food).endswith("hold")
+    assert tx_uid(food, legacy=True) == hashlib.sha256(legacy.encode("utf-8")).hexdigest()
+    assert tx_uid(food) != tx_uid(food, legacy=True)
 
 
 def test_unreviewed_not_in_pnl_until_explained(tmp_path: Path) -> None:
@@ -83,9 +83,10 @@ def test_leave_unlabeled_parks_outside_queue(tmp_path: Path) -> None:
     assert summary["unlabeled_count"] == 1
     assert summary["unlabeled_sum"] == -50000
     assert summary["expense"] == 72140.5
-    names = {c["name"] for c in summary["expense_by_category"]}
-    assert "Переводы без разметки" not in names
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Переводы без разметки"] == 50000
     assert "Подарки" not in names
+    assert summary["bars_ok"] is True
 
 
 MIXED_SBP = """\
@@ -202,6 +203,72 @@ def test_hold_not_imported_if_posted_already_exists(tmp_path: Path) -> None:
     assert len(clothes) == 1
     assert clothes[0]["status"] != "hold"
     assert again.dup_count >= 1
+
+
+def test_same_day_piggy_keeps_both_operation_codes(tmp_path: Path) -> None:
+    from app.parse_pdf import parse_pdf_text
+
+    text = """
+Выписка по счету
+За период с 01.08.2026 по 01.08.2026
+Поступления 0,00 RUR
+Расходы 300,00 RUR
+Операции по счету
+01.08.2026 OP1EDAAA Перечисление средств в рамках услуги "Копилка для сдачи" со счета 1 на счет 2
+-150,00 RUR
+01.08.2026 OP1EDBBB Перечисление средств в рамках услуги "Копилка для сдачи" со счета 1 на счет 2
+-150,00 RUR
+"""
+    store = _store(tmp_path)
+    txs = parse_pdf_text(text)
+    assert len(txs) == 2
+    result = store.import_transactions(txs, "piggy.pdf")
+    assert result.new_count == 2
+    rows = store.list_transactions(date_from="2026-08-01", date_to="2026-08-01")
+    assert len(rows) == 2
+    assert sum(abs(float(r["amount"])) for r in rows) == 300
+
+
+def test_hold_not_collapsed_into_unrelated_same_amount(tmp_path: Path) -> None:
+    from app.parse_pdf import parse_pdf_text
+
+    text = """
+Выписка по счету
+Операции по счету
+28.08.2026 CRD_MIGUSHA Операция по карте: 220015++++++7603, на сумму: 1150.00 RUR, дата совершения
+операции: 28.08.26, место совершения операции: RU\\KRASNOYARSK\\MIGUSHA MCC5812
+-1 150,00 RUR
+HOLD Неподтвержденная операция: 7AA111 45175380 RU SNEZHNYJ KOFE>Krasnoyarsk 27.08.26 1150.00 RUR 220015++++++7603, дата операции: 27.08.2026
+-1 150,00 RUR
+"""
+    store = _store(tmp_path)
+    store.import_transactions(parse_pdf_text(text), "mix.pdf")
+    rows = store.list_transactions(date_from="2026-08-01", date_to="2026-08-31")
+    assert len(rows) == 2
+    holds = [r for r in rows if r["status"] == "hold"]
+    assert len(holds) == 1
+    assert "KOFE" in (holds[0]["description"] or "").upper() or "SNEZHNYJ" in (
+        holds[0]["description"] or ""
+    ).upper()
+
+
+def test_import_reconciles_header_totals(tmp_path: Path) -> None:
+    from app.parse_pdf import extract_pdf_meta, parse_pdf_text
+    from tests.test_pdf import ALFA
+
+    store = _store(tmp_path)
+    txs = parse_pdf_text(ALFA)
+    meta = extract_pdf_meta(ALFA)
+    result = store.import_transactions(txs, "alfa.pdf", meta=meta)
+    rec = result.reconcile
+    assert rec is not None
+    assert rec["from_header"] is True
+    assert rec["matched"] is True
+    assert rec["income_ok"] is True
+    assert rec["expense_ok"] is True
+    summary = store.summary("2026-08-01", "2026-08-31")
+    assert summary["reconcile"]["matched"] is True
+    assert summary["bars_ok"] is True
 
 
 

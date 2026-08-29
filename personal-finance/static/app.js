@@ -146,6 +146,7 @@ function homeView() {
           </button>
         </div>
         <div class="delta">${esc(delta)}</div>
+        ${renderReconcile(s)}
         ${s && s.unreviewed_count ? `<div class="delta">Не разнесено: ${money(Math.abs(s.unreviewed_sum))} (${s.unreviewed_count})</div>` : ""}
       </section>
       <section class="card">
@@ -439,6 +440,25 @@ function renderSpikes() {
     html += `<ol class="recs">${recs.map((r) => `<li>${esc(r.text)}</li>`).join("")}</ol>`;
   }
   return html;
+}
+
+function renderReconcile(s) {
+  const rec = s?.reconcile;
+  if (!rec || (rec.stmt_income == null && rec.stmt_expense == null)) return "";
+  const ok = rec.matched && s.bars_ok !== false;
+  const hold = rec.book_holds ? ` · в обработке ${money(rec.book_holds)}` : "";
+  const inc = rec.income_ok
+    ? `доходы ${money(rec.stmt_income)}`
+    : `доходы ${money(rec.book_income)} вместо ${money(rec.stmt_income)}`;
+  const exp = rec.expense_ok
+    ? `расходы ${money(rec.stmt_expense)}`
+    : `расходы ${money(rec.book_expense)} вместо ${money(rec.stmt_expense)}`;
+  const title = ok ? "Сверка с выпиской — совпадает" : "Сверка с выпиской — не сходится";
+  return `
+    <div class="reconcile ${ok ? "ok" : "bad"}">
+      <div class="reconcile-title">${title}</div>
+      <div>${inc} · ${exp}${hold}</div>
+    </div>`;
 }
 
 function renderBars(rows, max, bucket, total) {
@@ -877,8 +897,16 @@ async function pullDrive() {
     state.notice = n
       ? `С Диска: +${n} операций` + (dups ? `, уже были: ${dups}` : "")
       : dups
-        ? "На Диске нет новых операций — эти даты уже в кассе"
+        ? "На Диске нет новых операций — статьи перепроверены"
         : "В папке пока нет выписок";
+    const rec = (res.files || []).map((f) => f.reconcile).find(Boolean) || res.reconcile;
+    if (rec && rec.matched === false) {
+      state.notice += rec.expense_ok === false
+        ? ` · расходы не сходятся на ${money(Math.abs(rec.expense_delta || 0))}`
+        : ` · доходы не сходятся на ${money(Math.abs(rec.income_delta || 0))}`;
+    } else if (rec && rec.matched) {
+      state.notice += " · итоги как в выписке";
+    }
     if (newest.period_to) {
       const [y, m] = newest.period_to.split("-");
       state.year = Number(y);
@@ -912,8 +940,16 @@ async function upload(file) {
     const res = await api("/api/import", { method: "POST", body });
     const n = res.import?.new_count ?? 0;
     const dups = res.import?.dup_count ?? 0;
-    state.notice = `Добавлено ${n} операций` + (dups ? `, пропущено дубликатов: ${dups}` : "");
+    state.notice = `Добавлено ${n} операций` + (dups ? `, уже были и перепроверены: ${dups}` : "");
     if (res.telegram_sent) state.notice += " · отчёт в Telegram";
+    const rec = res.import?.reconcile;
+    if (rec && rec.matched === false) {
+      state.notice += rec.expense_ok === false
+        ? ` · расходы не сходятся на ${money(Math.abs(rec.expense_delta || 0))}`
+        : ` · доходы не сходятся на ${money(Math.abs(rec.income_delta || 0))}`;
+    } else if (rec && rec.matched) {
+      state.notice += " · итоги как в выписке";
+    }
     if (res.import?.review_count) {
       state.view = "review";
       await loadReview();

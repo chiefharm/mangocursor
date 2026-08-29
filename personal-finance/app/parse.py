@@ -107,6 +107,47 @@ class ParsedTx:
         return self.posted_at.date()
 
 
+@dataclass
+class StatementMeta:
+    """Totals from the bank header, or summed from parsed lines if there is no header."""
+
+    income: float | None = None
+    expense: float | None = None
+    opening: float | None = None
+    closing: float | None = None
+    unconfirmed: float | None = None
+    period_from: str | None = None
+    period_to: str | None = None
+    from_header: bool = False
+
+    def as_dict(self) -> dict:
+        return {
+            "income": self.income,
+            "expense": self.expense,
+            "opening": self.opening,
+            "closing": self.closing,
+            "unconfirmed": self.unconfirmed,
+            "period_from": self.period_from,
+            "period_to": self.period_to,
+            "from_header": self.from_header,
+        }
+
+
+def meta_from_txs(txs: list[ParsedTx]) -> StatementMeta:
+    income = round(sum(t.amount for t in txs if t.amount > 0), 2)
+    expense = round(sum(-t.amount for t in txs if t.amount < 0), 2)
+    holds = round(sum(-t.amount for t in txs if t.amount < 0 and t.status == "hold"), 2)
+    dates = [t.posted_date.isoformat() for t in txs]
+    return StatementMeta(
+        income=income,
+        expense=expense,
+        unconfirmed=holds or None,
+        period_from=min(dates) if dates else None,
+        period_to=max(dates) if dates else None,
+        from_header=False,
+    )
+
+
 class ParseError(ValueError):
     pass
 
@@ -138,17 +179,34 @@ def sniff_kind(path: str | Path, filename: str | None = None) -> str:
 
 
 def parse_statement(path: str | Path, *, filename: str | None = None) -> list[ParsedTx]:
+    txs, _meta = parse_statement_with_meta(path, filename=filename)
+    return txs
+
+
+def parse_statement_with_meta(
+    path: str | Path, *, filename: str | None = None
+) -> tuple[list[ParsedTx], StatementMeta]:
     path = Path(path)
     kind = sniff_kind(path, filename)
     if kind == "pdf":
-        from .parse_pdf import parse_pdf_statement
+        from .parse_pdf import extract_pdf_meta, parse_pdf_text, read_pdf_text
 
-        return parse_pdf_statement(path, filename=filename or path.name)
+        text = read_pdf_text(path)
+        txs = parse_pdf_text(text, filename=filename or path.name)
+        meta = extract_pdf_meta(text)
+        if meta.income is None and meta.expense is None:
+            meta = meta_from_txs(txs)
+        elif meta.period_from is None:
+            fallback = meta_from_txs(txs)
+            meta.period_from = fallback.period_from
+            meta.period_to = fallback.period_to
+        return txs, meta
     if kind in {"xlsx", "xls"}:
         rows = _read_xlsx_rows(path)
     else:
         rows = _read_csv_rows(path)
-    return rows_to_transactions(rows)
+    txs = rows_to_transactions(rows)
+    return txs, meta_from_txs(txs)
 
 
 def rows_to_transactions(rows: list[list[object]]) -> list[ParsedTx]:

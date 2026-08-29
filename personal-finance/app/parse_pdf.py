@@ -8,7 +8,7 @@ from pathlib import Path
 from pypdf import PdfReader
 
 from .mcc import category_for_mcc
-from .parse import ParseError, ParsedTx, classify_review, parse_amount, parse_datetime
+from .parse import ParseError, ParsedTx, StatementMeta, classify_review, parse_amount, parse_datetime
 
 _FOOTER = [
     r"А\.А\. Панченко",
@@ -28,6 +28,20 @@ _OP_DATE = re.compile(
     r"дата совершения\s*операции:\s*(\d{2}\.\d{2}\.\d{2,4})",
     re.I,
 )
+_PERIOD = re.compile(
+    r"За период с\s+(\d{2}\.\d{2}\.\d{4})\s+по\s+(\d{2}\.\d{2}\.\d{4})",
+    re.I,
+)
+_HEADER_MONEY = re.compile(
+    r"^(Входящий остаток|Поступления|Расходы|Исходящий остаток|Неподтвержденные операции)"
+    r"\s+([+\-−]?\s*\d[\d \u00a0]*,\d{2})\s+RU[RB]",
+    re.I,
+)
+_HOLD_PLACE = re.compile(
+    r"\bRU[RS]?\s+(.+?)(?:\s+\d{2}\.\d{2}\.\d{2,4}|\s+\d[\d.]*\s+RUR)",
+    re.I,
+)
+_BARE_CARD = re.compile(r"(\d{6,}\++\d{4})")
 _OWN = (
     "копилка",
     "внутрибанковский перевод между счетами",
@@ -39,13 +53,47 @@ _CREDIT_PAY = ("погаш. задолж", "погашение задолжен�
 
 
 def parse_pdf_statement(path: str | Path, *, filename: str | None = None) -> list[ParsedTx]:
+    return parse_pdf_text(read_pdf_text(path), filename=filename or Path(path).name)
+
+
+def read_pdf_text(path: str | Path) -> str:
     reader = PdfReader(str(path))
     if reader.is_encrypted:
         raise ParseError("PDF закрыт паролем")
     text = "\n".join((page.extract_text() or "") for page in reader.pages)
     if not text.strip():
         raise ParseError("В PDF нет текста — нужна выписка, а не скан без слоя")
-    return parse_pdf_text(text, filename=filename or Path(path).name)
+    return text
+
+
+def extract_pdf_meta(text: str) -> StatementMeta:
+    meta = StatementMeta()
+    period = _PERIOD.search(text.replace("\xa0", " "))
+    if period:
+        start = parse_datetime(period.group(1))
+        end = parse_datetime(period.group(2))
+        if start:
+            meta.period_from = start.date().isoformat()
+        if end:
+            meta.period_to = end.date().isoformat()
+    labels = {
+        "входящий остаток": "opening",
+        "поступления": "income",
+        "расходы": "expense",
+        "исходящий остаток": "closing",
+        "неподтвержденные операции": "unconfirmed",
+    }
+    for line in text.replace("\xa0", " ").splitlines():
+        m = _HEADER_MONEY.match(line.strip())
+        if not m:
+            continue
+        key = labels.get(m.group(1).lower())
+        amount = parse_amount(m.group(2))
+        if not key or amount is None:
+            continue
+        setattr(meta, key, abs(amount) if key in {"income", "expense", "unconfirmed"} else amount)
+        meta.from_header = True
+    return meta
 
 
 def parse_pdf_text(text: str, *, filename: str = "statement.pdf") -> list[ParsedTx]:
@@ -200,7 +248,12 @@ def _op_to_tx(op: dict[str, str | bool]) -> ParsedTx | None:
 def _pick_mcc(desc: str) -> str:
     found = [int(x) for x in _MCC.findall(desc)]
     if not found:
-        return ""
+        for inner in re.findall(r"\b(\d{4})\b", desc):
+            n = int(inner)
+            if n not in {3990, 3991} and category_for_mcc(n):
+                found.append(n)
+        if not found:
+            return ""
     preferred = [c for c in found if c not in {3990, 3991}]
     code = preferred[-1] if preferred else found[-1]
     if code in {3990, 3991}:
@@ -212,7 +265,7 @@ def _pick_mcc(desc: str) -> str:
 
 
 def _card_tail(desc: str) -> str:
-    m = _CARD.search(desc)
+    m = _CARD.search(desc) or _BARE_CARD.search(desc)
     if not m:
         return ""
     digits = re.sub(r"\D", "", m.group(1))
@@ -257,15 +310,27 @@ def _hold_posted(desc: str):
 
 
 def _hold_merchant(desc: str) -> str:
-    m = re.search(
-        r"неподтвержденн\w*\s+операци\w*:\s+\S+\s+(.+?)\s+\d{2}\.\d{2}\.\d{2,4}",
-        desc,
-        re.I,
-    )
-    name = (m.group(1).strip() if m else "")
-    blob = f"{name} {desc}".lower()
+    blob = desc.lower()
     if "tsum" in blob or "цум" in blob:
         return "ЦУМ"
+    if "samokat" in blob or "самокат" in blob:
+        return "Самокат"
+    place = _HOLD_PLACE.search(desc)
+    name = ""
+    if place:
+        name = place.group(1).split(">")[0]
+        name = re.sub(r"MCC\d{4}", "", name, flags=re.I)
+        name = re.sub(r"\b\d{4}\b", "", name)
+        name = re.sub(r"\s+", " ", name).strip(" .")
+    if not name:
+        m = re.search(
+            r"неподтвержденн\w*\s+операци\w*:\s+\S+\s+(.+?)\s+\d{2}\.\d{2}\.\d{2,4}",
+            desc,
+            re.I,
+        )
+        name = (m.group(1).strip() if m else "")
+    if re.search(r"litres|литрес", f"{name} {desc}", re.I):
+        return "Литрес"
     return name[:80]
 
 
@@ -275,6 +340,16 @@ def _category_from_text(desc: str, amount: float) -> str:
         return "Переводы"
     if "tsum" in blob or "цум" in blob:
         return "Одежда"
+    if "samokat" in blob or "самокат" in blob:
+        return "Супермаркеты"
+    if "litres" in blob or "литрес" in blob:
+        return "Книги"
+    if "lemanapro" in blob or "леруа" in blob:
+        return "Дом и ремонт"
+    if "timeweb" in blob or "reg ru" in blob or "regru" in blob:
+        return "Связь"
+    if "gosuslugi" in blob or "госуслуг" in blob:
+        return "Госуслуги"
     if "оплата по договору" in blob:
         return "Оплата по договору"
     if "лотере" in blob:

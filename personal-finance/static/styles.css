@@ -566,6 +566,17 @@ button.tx-row { cursor: pointer; }
   50% { transform: scale(1.08); opacity: 0.85; }
 }
 
+.reconcile {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.reconcile-title { font-weight: 700; margin-bottom: 2px; }
+.reconcile.ok { background: rgba(31, 107, 74, 0.1); color: var(--in); }
+.reconcile.bad { background: rgba(163, 59, 44, 0.1); color: var(--out); }
+
 @media (max-width: 520px) {
   .banner { flex-direction: column; align-items: stretch; }
   .banner .primary { width: 100%; }
