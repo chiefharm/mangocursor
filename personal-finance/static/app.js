@@ -132,12 +132,14 @@ function homeView() {
       <section class="card">
         <h2>Загрузить выписку</h2>
         ${state.me.drive ? `<button class="primary" id="pull-drive" style="width:100%;margin-bottom:12px">Забрать с Google Drive</button>` : ""}
-        <label class="drop" id="drop">
-          <strong>Вложить выписку</strong>
-          <p>PDF Альфа, CSV или Excel. На iPhone: Обзор → Загрузки.</p>
-          <span class="primary pick-file" id="pick-file">Выбрать файл</span>
+        <div class="drop" id="drop">
+          <label class="drop-hit" for="file">
+            <strong>Вложить выписку</strong>
+            <p>PDF Альфа, CSV или Excel. На iPhone: Обзор → Загрузки.</p>
+          </label>
+          <label class="primary pick-file" for="file">Выбрать файл</label>
           <input id="file" class="file-hidden" type="file" />
-        </label>
+        </div>
         <p class="hint">Имя файла не важно — даты беру из операций внутри. Серый файл после обновления страницы больше не должен быть.</p>
         <div class="error" id="upload-error" hidden></div>
       </section>

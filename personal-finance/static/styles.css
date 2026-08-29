@@ -306,7 +306,7 @@ button:active { transform: translateY(1px); }
 .drop {
   position: relative;
   display: grid;
-  place-items: center;
+  justify-items: stretch;
   border: 1.5px dashed #cbb496;
   border-radius: 20px;
   padding: 26px 16px 18px;
@@ -316,21 +316,26 @@ button:active { transform: translateY(1px); }
     rgba(255, 250, 243, 0.55);
 }
 .drop.drag { background: #fff; border-color: var(--ink); }
-.drop strong { display: block; font-size: 17px; }
-.drop p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
-.drop::before {
+.drop-hit {
+  display: grid;
+  justify-items: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.drop-hit strong { display: block; font-size: 17px; }
+.drop-hit p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+.drop-hit::before {
   content: "+";
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   margin: 0 auto 10px;
   border-radius: 50%;
   border: 1.5px solid var(--gold);
   color: var(--gold);
   font-size: 22px;
   line-height: 1;
-  pointer-events: none;
 }
 .pick-file {
   display: inline-flex;
@@ -338,6 +343,7 @@ button:active { transform: translateY(1px); }
   justify-content: center;
   width: 100%;
   margin-top: 14px;
+  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
@@ -346,10 +352,12 @@ button:active { transform: translateY(1px); }
   width: 1px;
   height: 1px;
   padding: 0;
-  margin: -1px;
+  margin: 0;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
