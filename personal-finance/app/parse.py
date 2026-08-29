@@ -117,12 +117,12 @@ def sniff_kind(path: str | Path, filename: str | None = None) -> str:
     suffix = Path(name).suffix.lower()
     head = b""
     try:
-        head = path.read_bytes()[:16]
+        head = path.read_bytes()[:4096]
     except OSError:
         pass
     if head.startswith(b"\xff\xd8") or head.startswith(b"\x89PNG") or head.startswith(b"GIF8"):
         raise ParseError("Это фото или картинка. Нужен файл выписки: PDF, CSV или Excel.")
-    if head.startswith(b"%PDF") or suffix == ".pdf":
+    if b"%PDF" in head[:1024] or suffix == ".pdf" or name.endswith(".pdf"):
         return "pdf"
     ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
     if head.startswith(ole) or suffix == ".xls":

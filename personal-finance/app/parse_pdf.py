@@ -39,10 +39,16 @@ _CREDIT_PAY = ("погаш. задолж", "погашение задолжен�
 
 
 def parse_pdf_statement(path: str | Path, *, filename: str | None = None) -> list[ParsedTx]:
-    reader = PdfReader(str(path))
+    try:
+        reader = PdfReader(str(path))
+    except Exception as exc:  # noqa: BLE001 — surface as a parse error, not a 500
+        raise ParseError("Не удалось прочитать PDF. Нужна выписка Альфа как файл, не фото экрана.") from exc
     if reader.is_encrypted:
         raise ParseError("PDF закрыт паролем")
-    text = "\n".join((page.extract_text() or "") for page in reader.pages)
+    try:
+        text = "\n".join((page.extract_text() or "") for page in reader.pages)
+    except Exception as exc:  # noqa: BLE001
+        raise ParseError("В PDF не получилось достать текст операций.") from exc
     if not text.strip():
         raise ParseError("В PDF нет текста — нужна выписка, а не скан без слоя")
     return parse_pdf_text(text, filename=filename or Path(path).name)

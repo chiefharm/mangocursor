@@ -85,3 +85,15 @@ def test_upload_iphone_name_without_extension(client: TestClient) -> None:
         )
     assert res.status_code == 200, res.text
     assert res.json()["import"]["new_count"] == 5
+
+
+def test_pdf_is_not_rejected_as_spreadsheet(client: TestClient) -> None:
+    res = client.post(
+        "/api/import",
+        files={"file": ("Выписка_по_счёту.pdf", b"%PDF-1.3\n%\x00\n1 0 obj\n<<>>\nendobj\n", "application/pdf")},
+    )
+    assert res.status_code == 400
+    detail = str(res.json().get("detail") or res.text)
+    assert "CSV или Excel (.xlsx)" not in detail
+    assert "xlsx" not in detail.lower()
+    assert "PDF" in detail or "pdf" in detail.lower()
