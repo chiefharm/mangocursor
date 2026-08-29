@@ -121,7 +121,7 @@ def normalize_spoken_numbers(text: str) -> str:
         return match.group(0)
 
     text = re.sub(
-        r"\b((?:[а-яё]+)(?:\s+[а-яё]+)?)\s+ноль\s+ноль\b",
+        rf"\b(({_RU_NUM_WORD})(?:\s+({_RU_NUM_WORD}))?)\s+ноль\s+ноль\b",
         spoken_hour_zeros,
         text,
         flags=re.IGNORECASE,

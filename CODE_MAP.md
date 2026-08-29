@@ -36,6 +36,12 @@
 | `deploy/vps.host` | IP VPS |
 | `deploy/install_revenue_cron.sh` | cron отчётов выручки 05:00 MSK |
 
+## Тесты
+
+| Файл | Назначение |
+|------|------------|
+| `tests/test_transcript_utils.py` | Регрессии нормализации времени и DOCX-текста без ролей |
+
 ## Память AI
 
 | Файл | Назначение |

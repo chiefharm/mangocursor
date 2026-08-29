@@ -218,4 +218,16 @@ API Красноярска проверен 03.07: за день ~324 звонк
 
 ---
 
+## Сессия 29.08.2026 — проверка Cursor Cloud
+
+- Git синхронизирован с `origin/master`; `.env`, VPS IP и известные токены в workspace/git не обнаружены.
+- Все 27 тестов `personal-finance` прошли.
+- Добавлены регрессионные тесты нормализации времени в расшифровках.
+- Исправлено `семнадцать ноль ноль` → `17:00` без лишнего `0`.
+- `deploy/test_summary_fmt.py` теперь запускается напрямую из корня или каталога `deploy`.
+- Для Cloud Agent требуется install-команда по обоим manifests:
+  `python3 -m pip install --user -r requirements.txt -r personal-finance/requirements.txt`.
+
+---
+
 *Обновлено: 2026-08-29*
