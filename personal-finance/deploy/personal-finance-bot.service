@@ -1,0 +1,16 @@
+[Unit]
+Description=Personal finance Telegram listener (group buttons and /цель)
+After=network.target
+Wants=personal-finance.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/personal-finance
+EnvironmentFile=/opt/personal-finance/.env
+ExecStart=/opt/personal-finance/.venv/bin/python -m app.bot
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

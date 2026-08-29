@@ -34,4 +34,5 @@ index.html
 !VPS_AUTOMATION.md
 !tryon-web/static/index.html
 !tryon-web/**/*.html
+!personal-finance/**/*.html
 
