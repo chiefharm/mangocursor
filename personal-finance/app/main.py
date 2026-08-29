@@ -18,8 +18,10 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .parse import ParseError, parse_statement
-from .report import month_title, telegram_import_message, telegram_reviewed_message
+from .report import month_title
 from .store import FinanceStore, public_tx
+from .advice import build_digest
+from .notify import send_after_import, send_after_review_cleared
 from . import telegram as tg
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -218,20 +220,19 @@ async def import_statement(file: UploadFile = File(...)) -> dict:
 
     telegram_sent = False
     telegram_error = ""
-    if tg.telegram_enabled() and result.new_count:
+    telegram_kind = ""
+    if result.new_count:
         try:
-            tg.send_message(
-                telegram_import_message(
-                    filename=filename,
-                    imported={
-                        "new_count": result.new_count,
-                        "dup_count": result.dup_count,
-                    },
-                    summary=summary,
-                    previous=previous if previous["tx_count"] else None,
-                )
+            telegram_kind = send_after_import(
+                store,
+                imported={
+                    "new_count": result.new_count,
+                    "dup_count": result.dup_count,
+                },
+                summary=summary,
+                previous=previous if previous["tx_count"] else None,
             )
-            telegram_sent = True
+            telegram_sent = bool(telegram_kind)
         except Exception as exc:  # noqa: BLE001 — surface to UI, don't crash import
             telegram_error = str(exc)
 
@@ -248,6 +249,7 @@ async def import_statement(file: UploadFile = File(...)) -> dict:
         },
         "summary": summary,
         "telegram_sent": telegram_sent,
+        "telegram_kind": telegram_kind,
         "telegram_error": telegram_error,
     }
 
@@ -264,6 +266,12 @@ async def summary(year: int | None = None, month: int | None = None) -> dict:
     prev_from, prev_to = store.previous_period(date_from, date_to)
     previous = store.summary(prev_from, prev_to)
     y, m = date.fromisoformat(date_from).year, date.fromisoformat(date_from).month
+    digest = build_digest(
+        current,
+        previous if previous["tx_count"] else None,
+        goal=store.get_goal(),
+        stances=store.stances(),
+    )
     return {
         "ok": True,
         "title": month_title(y, m),
@@ -271,6 +279,8 @@ async def summary(year: int | None = None, month: int | None = None) -> dict:
         "month": m,
         "summary": current,
         "previous": previous,
+        "goal": store.get_goal(),
+        "advice": digest.to_dict(),
     }
 
 
@@ -327,13 +337,21 @@ async def review_one(tx_id: int, request: Request) -> dict:
 
     remaining = store.review_count()
     telegram_sent = False
-    if remaining == 0 and tg.telegram_enabled():
-        today = date.today()
-        date_from, date_to = _period(today.year, today.month)
+    if remaining == 0:
+        posted = str(row.get("posted_date") or date.today().isoformat())
+        d = date.fromisoformat(posted[:10])
+        date_from, date_to = _period(d.year, d.month)
         summary = store.summary(date_from, date_to)
+        prev_from, prev_to = store.previous_period(date_from, date_to)
+        previous = store.summary(prev_from, prev_to)
         try:
-            tg.send_message(telegram_reviewed_message(summary))
-            telegram_sent = True
+            telegram_sent = bool(
+                send_after_review_cleared(
+                    store,
+                    summary=summary,
+                    previous=previous if previous["tx_count"] else None,
+                )
+            )
         except Exception:
             telegram_sent = False
     return {
@@ -344,21 +362,42 @@ async def review_one(tx_id: int, request: Request) -> dict:
     }
 
 
+@app.get("/api/goal")
+async def get_goal() -> dict:
+    return {"ok": True, "goal": store.get_goal()}
+
+
+@app.post("/api/goal")
+async def set_goal(request: Request) -> dict:
+    body = await request.json()
+    raw = body.get("amount")
+    if raw in (None, ""):
+        raise HTTPException(status_code=400, detail="Нужна сумма цели")
+    try:
+        amount = float(str(raw).replace(" ", "").replace(",", "."))
+        goal = store.set_goal(amount, str(body.get("kind") or "net"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Нужна сумма цели") from exc
+    return {"ok": True, "goal": goal}
+
+
 @app.post("/api/notify")
 async def notify(year: int | None = None, month: int | None = None) -> dict:
     if not tg.telegram_enabled():
         raise HTTPException(status_code=400, detail="Telegram не настроен")
     date_from, date_to = _period(year, month)
     summary = store.summary(date_from, date_to)
+    if int(summary.get("unreviewed_count") or 0) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Сначала разнесите переводы без статьи — иначе советы будут врать",
+        )
     prev_from, prev_to = store.previous_period(date_from, date_to)
     previous = store.summary(prev_from, prev_to)
-    tg.send_message(
-        telegram_import_message(
-            filename="",
-            imported={"new_count": summary["tx_count"], "dup_count": 0},
-            summary=summary,
-            previous=previous if previous["tx_count"] else None,
-        )
+    send_after_review_cleared(
+        store,
+        summary=summary,
+        previous=previous if previous["tx_count"] else None,
     )
     return {"ok": True}
 

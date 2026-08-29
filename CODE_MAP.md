@@ -87,7 +87,7 @@ build_call_message(..., site_label, branch)
 | `docs/soco-salon-ai-tryon-session.md` | Переписка: Perfect Corp vs AILab/GPT, архитектура |
 | `tools/hair_tryon_test/run_comparison.py` | Тест API примерки |
 | `tryon-web/` | **Веб-сервис YouCam**: «до» + до 3 референсов → «после» |
-| `personal-finance/` | **Отдельный** личный учёт: выписка банка → сайт → пояснение переводов без статьи. Не связан с салоном/Mango |
+| `personal-finance/` | **Отдельный** личный учёт: выписка → сайт → пояснение переводов. Группа Telegram: итоги, цель, всплески, кнопки обратной связи. Не салон/Mango |
 | `docs/SECURITY_AUDIT_2026-07-28.md` | Аудит утечек на GitHub |
 
 ---

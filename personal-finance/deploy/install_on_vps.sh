@@ -94,13 +94,19 @@ else
   echo "==> keep existing $DEST/.env"
 fi
 
-sed -i 's/\r$//' "$DEST/deploy/personal-finance.service" || true
+sed -i 's/\r$//' "$DEST/deploy/personal-finance.service" "$DEST/deploy/personal-finance-bot.service" || true
 cp "$DEST/deploy/personal-finance.service" /etc/systemd/system/personal-finance.service
+cp "$DEST/deploy/personal-finance-bot.service" /etc/systemd/system/personal-finance-bot.service
 systemctl daemon-reload
 systemctl enable --now personal-finance
 systemctl restart personal-finance
+if grep -qE '^FINANCE_TELEGRAM_ENABLED=1' "$DEST/.env"; then
+  systemctl enable --now personal-finance-bot
+  systemctl restart personal-finance-bot || true
+fi
 sleep 2
 systemctl --no-pager --full status personal-finance | head -n 16 || true
+systemctl --no-pager --full status personal-finance-bot | head -n 12 || true
 
 if command -v ufw >/dev/null 2>&1; then
   ufw allow "${PORT}/tcp" || true
@@ -113,6 +119,7 @@ fi
 
 echo
 echo "[DONE] Касса: http://${PUB}:$PORT"
+echo "В .env укажите FINANCE_TELEGRAM_CHAT_ID группы кассы (отрицательный id), не группы SOCO."
 if [[ -n "$PASS" ]]; then
   echo "Пароль входа (сохраните, в git его нет): $PASS"
 elif [[ -f "$DEST/data/.initial-password" ]]; then

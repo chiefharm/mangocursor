@@ -47,6 +47,26 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(posted_date);
 CREATE INDEX IF NOT EXISTS idx_tx_review ON transactions(needs_review);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS category_stance (
+    category_key TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    stance TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS digests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    period_from TEXT NOT NULL,
+    period_to TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
 """
 
 
@@ -289,6 +309,103 @@ class FinanceStore:
         prev_end = start - timedelta(days=1)
         prev_start = prev_end - timedelta(days=span - 1)
         return prev_start.isoformat(), prev_end.isoformat()
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+        if not row:
+            return default
+        return str(row["value"])
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO settings (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
+
+    def get_goal(self) -> dict[str, Any] | None:
+        raw = self.get_setting("goal_amount")
+        if raw is None or raw == "":
+            return None
+        try:
+            amount = float(raw)
+        except ValueError:
+            return None
+        kind = self.get_setting("goal_kind", "net") or "net"
+        return {"kind": kind, "amount": amount}
+
+    def set_goal(self, amount: float, kind: str = "net") -> dict[str, Any]:
+        if amount <= 0:
+            raise ValueError("Цель должна быть больше нуля")
+        if kind not in {"net", "expense_cap"}:
+            kind = "net"
+        self.set_setting("goal_amount", str(round(float(amount), 2)))
+        self.set_setting("goal_kind", kind)
+        goal = self.get_goal()
+        assert goal is not None
+        return goal
+
+    def stances(self) -> dict[str, str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT category_key, stance FROM category_stance"
+            ).fetchall()
+        return {str(r["category_key"]): str(r["stance"]) for r in rows}
+
+    def set_stance(self, category: str, stance: str) -> None:
+        if stance not in {"normal", "cut", "not_expense"}:
+            raise ValueError("unknown stance")
+        name = category.strip()
+        key = name.casefold()
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO category_stance (category_key, category, stance, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(category_key) DO UPDATE SET
+                    category = excluded.category,
+                    stance = excluded.stance,
+                    updated_at = excluded.updated_at
+                """,
+                (key, name, stance, now),
+            )
+
+    def save_digest(self, payload: dict[str, Any]) -> int:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO digests (created_at, period_from, period_to, payload)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    now,
+                    payload.get("period_from") or "",
+                    payload.get("period_to") or "",
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def get_digest(self, digest_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM digests WHERE id = ?", (digest_id,)
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            data = json.loads(row["payload"])
+        except json.JSONDecodeError:
+            return None
+        return data if isinstance(data, dict) else None
 
 
 def effective_category(row: dict[str, Any]) -> str:

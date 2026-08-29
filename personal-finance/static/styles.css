@@ -244,8 +244,12 @@ textarea, .text-input {
 
 .error { color: var(--out); font-size: 14px; margin-top: 8px; }
 .ok { color: var(--in); font-size: 14px; }
-
 .hint { color: var(--muted); font-size: 13px; margin-top: 10px; line-height: 1.45; }
+
+.goal-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.goal-row .text-input { flex: 1; }
+.recs { margin: 8px 0 0; padding-left: 18px; color: var(--ink); }
+.recs li { margin: 8px 0; line-height: 1.4; }
 
 @media (max-width: 520px) {
   .month-nav h1 { font-size: 28px; }

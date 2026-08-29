@@ -115,6 +115,11 @@ function homeView() {
         ${s && s.unreviewed_count ? `<div class="delta">Не разнесено: ${money(Math.abs(s.unreviewed_sum))} (${s.unreviewed_count})</div>` : ""}
       </section>
       <section class="card">
+        <h2>Цель месяца</h2>
+        <p class="hint">Сальдо, которое хотите видеть по итогам месяца. Отчёт в группу с советами уйдёт после разнесения переводов.</p>
+        ${renderGoal(s)}
+      </section>
+      <section class="card">
         <h2>Загрузить выписку</h2>
         <label class="drop" id="drop">
           <strong>CSV или Excel из банка</strong>
@@ -127,6 +132,7 @@ function homeView() {
       <section class="card">
         <h2>Расходы по статьям</h2>
         ${renderBars(s?.expense_by_category, maxExp, "out") || `<p class="empty">Пока пусто</p>`}
+        ${renderSpikes()}
       </section>
       <section class="card">
         <h2>Доходы</h2>
@@ -177,6 +183,43 @@ function reviewView() {
     </div>`;
 }
 
+function renderGoal(s) {
+  const goal = state.summary?.goal;
+  const gap = state.summary?.advice?.gap;
+  const amount = goal?.amount ? Math.round(goal.amount) : "";
+  const status = !goal
+    ? "Пока не задана — бот в группе не знает, к чему советовать."
+    : s
+      ? (gap > 0 ? `Не хватает ${money(gap)}` : `Цель выполняется, запас ${money(Math.abs(gap || 0))}`)
+      : "";
+  return `
+    <div class="goal-row">
+      <input class="text-input" id="goal-amount" inputmode="numeric" placeholder="80000" value="${amount}" />
+      <button class="primary" id="save-goal">Сохранить</button>
+    </div>
+    <p class="delta">${esc(status)}</p>
+    <p class="hint">В группе: /цель 80000</p>`;
+}
+
+function renderSpikes() {
+  const spikes = state.summary?.advice?.spikes || [];
+  const recs = state.summary?.advice?.recs || [];
+  if (!spikes.length && !recs.length) return "";
+  let html = "";
+  if (spikes.length) {
+    html += `<h2 style="margin-top:18px">Сильно выросли</h2>`;
+    html += spikes.map((row) => `
+      <div class="bar-row">
+        <div class="meta"><span>${esc(row.name)}</span><span>+${money(row.diff)}</span></div>
+      </div>`).join("");
+  }
+  if (recs.length) {
+    html += `<h2 style="margin-top:18px">К цели</h2>`;
+    html += `<ol class="recs">${recs.map((r) => `<li>${esc(r.text)}</li>`).join("")}</ol>`;
+  }
+  return html;
+}
+
 function renderBars(rows, max, kind) {
   if (!rows || !rows.length) return "";
   return rows.map((row) => `
@@ -209,11 +252,21 @@ function bindHome() {
   $("#notify-btn")?.addEventListener("click", async () => {
     try {
       await api(`/api/notify?year=${state.year}&month=${state.month}`, { method: "POST" });
-      state.notice = "Отчёт ушёл в Telegram";
+      state.notice = "Отчёт ушёл в Telegram-группу";
       render();
     } catch (err) {
       state.notice = "";
-      alert(err.message || "Не удалось отправить");
+      alert(err.data?.detail || err.message || "Не удалось отправить");
+    }
+  });
+  $("#save-goal")?.addEventListener("click", async () => {
+    const raw = $("#goal-amount")?.value || "";
+    try {
+      await api("/api/goal", { method: "POST", body: { amount: raw, kind: "net" } });
+      state.notice = "Цель сохранена";
+      await loadSummary();
+    } catch (err) {
+      alert(err.data?.detail || err.message || "Не сохранилось");
     }
   });
   const drop = $("#drop");

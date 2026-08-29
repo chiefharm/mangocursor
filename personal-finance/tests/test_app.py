@@ -62,12 +62,19 @@ def test_upload_and_review_transfer(client: TestClient) -> None:
             "is_internal": True,
         },
     )
-    summary = client.get("/api/summary?year=2026&month=8").json()["summary"]
-    assert summary["unreviewed_count"] == 0
-    names = {c["name"] for c in summary["expense_by_category"]}
+    summary = client.get("/api/summary?year=2026&month=8").json()
+    assert summary["summary"]["unreviewed_count"] == 0
+    names = {c["name"] for c in summary["summary"]["expense_by_category"]}
     assert "Подарки" in names
-    leftover = [c for c in summary["expense_by_category"] if "перевод" in c["name"].lower()]
+    leftover = [c for c in summary["summary"]["expense_by_category"] if "перевод" in c["name"].lower()]
     assert leftover == []
+
+    saved_goal = client.post("/api/goal", json={"amount": "80000", "kind": "net"})
+    assert saved_goal.status_code == 200
+    assert saved_goal.json()["goal"]["amount"] == 80000
+    again = client.get("/api/summary?year=2026&month=8").json()
+    assert again["goal"]["amount"] == 80000
+    assert "advice" in again
 
 
 def test_bad_file(client: TestClient) -> None:

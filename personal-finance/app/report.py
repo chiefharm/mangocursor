@@ -164,3 +164,94 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
     if 2 <= n <= 4:
         return few
     return many
+
+
+def telegram_pending_message(
+    *,
+    imported: dict[str, Any],
+    summary: dict[str, Any],
+    site_url: str = "",
+) -> str:
+    n = int(summary.get("unreviewed_count") or 0)
+    lines = [
+        "<b>Касса</b> · выписка загружена",
+        f"Новых операций: {imported.get('new_count') or 0}"
+        + (f" · дубликаты: {imported.get('dup_count')}" if imported.get("dup_count") else ""),
+        "",
+        f"Нужно пояснить <b>{n}</b> "
+        + _plural(n, "перевод", "перевода", "переводов")
+        + " без статьи"
+        + (
+            f" ({money(abs(float(summary.get('unreviewed_sum') or 0)))})"
+            if summary.get("unreviewed_sum")
+            else ""
+        ),
+        "Итоги, всплески и советы по цели пришлю, когда разнесёте переводы.",
+    ]
+    if site_url:
+        lines.append(site_url)
+    return "\n".join(lines)
+
+
+def telegram_digest_message(digest: Any) -> str:
+    from .advice import Digest
+
+    if not isinstance(digest, Digest):
+        digest = Digest.from_dict(digest)
+    period = format_period(digest.period_from, digest.period_to)
+    lines = [
+        "<b>Касса</b> · итоги выписки",
+        period,
+        "",
+        f"Доходы: <b>{money(digest.income)}</b>",
+        f"Расходы: <b>{money(digest.expense)}</b>",
+        f"Сальдо: <b>{signed_money(digest.net)}</b>",
+    ]
+    if digest.goal_amount is not None:
+        lines.append(f"Цель (сальдо): <b>{money(digest.goal_amount)}</b>")
+        if digest.gap is None:
+            pass
+        elif digest.gap > 0:
+            lines.append(f"До цели не хватает <b>{money(digest.gap)}</b>")
+        else:
+            lines.append(f"Цель выполнена, запас {money(abs(digest.gap))}")
+    else:
+        lines.append("Цель не задана — /цель 80000")
+    if digest.spikes:
+        lines.append("")
+        lines.append("Сильно выросли:")
+        for spike in digest.spikes[:5]:
+            was = f"было {money(spike.previous)}" if spike.previous else "раньше не было"
+            lines.append(
+                f"• {spike.name} — {money(spike.current)} ({was}, +{money(spike.diff)})"
+            )
+    if digest.recs:
+        lines.append("")
+        lines.append("Как дотянуть цель:")
+        for i, rec in enumerate(digest.recs, 1):
+            lines.append(f"{i}. {rec.text}")
+    return "\n".join(lines)
+
+
+def digest_keyboard(digest_id: int, digest: Any) -> dict[str, Any]:
+    from .advice import Digest
+
+    if not isinstance(digest, Digest):
+        digest = Digest.from_dict(digest)
+    rows: list[list[dict[str, str]]] = []
+    for i, spike in enumerate(digest.spikes[:2]):
+        short = spike.name if len(spike.name) <= 16 else spike.name[:14] + "…"
+        rows.append(
+            [
+                {"text": f"{short}: норма", "callback_data": f"fb:{digest_id}:{i}:n"},
+                {"text": "сократить", "callback_data": f"fb:{digest_id}:{i}:c"},
+                {"text": "не расход", "callback_data": f"fb:{digest_id}:{i}:x"},
+            ]
+        )
+    rows.append(
+        [
+            {"text": "Цель ок", "callback_data": "goal:ok"},
+            {"text": "Другая цель", "callback_data": "goal:edit"},
+        ]
+    )
+    return {"inline_keyboard": rows}

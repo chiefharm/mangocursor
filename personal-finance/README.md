@@ -60,9 +60,18 @@ git -C /opt/mango-pipeline fetch origin cursor/personal-finance-web-2b09 && \
 git -C /opt/mango-pipeline show origin/cursor/personal-finance-web-2b09:personal-finance/deploy/install_on_vps.sh | bash
 ```
 
-Скрипт поставит systemd, откроет порт 8090, создаст пароль входа и (если есть) возьмёт **личку** Telegram из `/opt/mango-pipeline/.env` — без рабочих групп.
+Скрипт поставит systemd (`personal-finance` + `personal-finance-bot`), откроет порт 8090, создаст пароль входа. Токен бота может взять из mango `.env`, **чат — замените на id группы кассы** (отрицательный). Группы SOCO не использовать.
 
 Сайт: `http://ВАШ_IP:8090`
+
+## Telegram-группа
+
+1. Создайте отдельную группу (не салон).
+2. Добавьте бота, в `.env` пропишите `FINANCE_TELEGRAM_CHAT_ID` группы.
+3. На сайте задайте цель месяца **или** в группе: `/цель 80000`.
+4. После загрузки выписки: если есть переводы без статьи — короткое «разнесите на сайте». Когда очередь пустая — итоги, всплески, советы и кнопки: норма / сократить / не расход.
+
+Слушатель кнопок: `systemctl status personal-finance-bot`. Один бот не должен крутить `getUpdates` в другом процессе.
 
 Nginx (пример):
 
@@ -82,6 +91,7 @@ server {
 Только в `.env`, не в git:
 
 - `FINANCE_PASSWORD` — вход на сайт
-- `FINANCE_TELEGRAM_BOT_TOKEN` / `FINANCE_TELEGRAM_CHAT_ID` — личный дайджест
+- `FINANCE_TELEGRAM_BOT_TOKEN` / `FINANCE_TELEGRAM_CHAT_ID` — **группа кассы**, не чаты салона
+- `FINANCE_SITE_URL` — ссылка на сайт в сообщении «разнесите переводы»
 
 База: `data/ledger.sqlite` (выписки и пояснения).
