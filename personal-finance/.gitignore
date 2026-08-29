@@ -1,0 +1,16 @@
+.env
+.venv/
+venv/
+.deps/
+__pycache__/
+*.pyc
+data/
+*.sqlite
+*.sqlite-journal
+.pytest_cache/
+
+*.pyc
+data/
+*.sqlite
+*.sqlite-journal
+.pytest_cache/
