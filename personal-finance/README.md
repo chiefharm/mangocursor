@@ -37,20 +37,32 @@ cd personal-finance
 PYTHONPATH=. python -m pytest -q
 ```
 
-## Деплой (свой каталог, не mango-pipeline)
+## Деплой на европейский VPS (свой каталог, не mango-pipeline)
+
+Путь на сервере: `/opt/personal-finance`, порт **8090**. Салонный пайплайн не трогаем.
+
+С компьютера, где уже есть `deploy/vps.host` и SSH-ключ:
+
+```powershell
+.\personal-finance\deploy\deploy_to_vps.ps1
+```
+
+или:
 
 ```bash
-sudo mkdir -p /opt/personal-finance
-# скопируйте содержимое personal-finance/ в /opt/personal-finance/
-cd /opt/personal-finance
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env && nano .env
-
-sudo cp deploy/personal-finance.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now personal-finance
+bash personal-finance/deploy/deploy_to_vps.sh
 ```
+
+С консоли Timeweb (без ПК) — одна команда, файлы берутся из уже клонированного `/opt/mango-pipeline`:
+
+```bash
+git -C /opt/mango-pipeline fetch origin cursor/personal-finance-web-2b09 && \
+git -C /opt/mango-pipeline show origin/cursor/personal-finance-web-2b09:personal-finance/deploy/install_on_vps.sh | bash
+```
+
+Скрипт поставит systemd, откроет порт 8090, создаст пароль входа и (если есть) возьмёт **личку** Telegram из `/opt/mango-pipeline/.env` — без рабочих групп.
+
+Сайт: `http://ВАШ_IP:8090`
 
 Nginx (пример):
 
