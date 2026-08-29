@@ -19,7 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .parse import ParseError, parse_statement
 from .report import month_title
-from .store import FinanceStore, public_tx, UNLABELED_CATEGORY
+from .store import FinanceStore, public_tx, INCOME_CATEGORY, UNLABELED_CATEGORY
 from .advice import build_digest
 from .notify import send_after_import, send_after_review_cleared
 from . import telegram as tg
@@ -50,7 +50,7 @@ DEFAULT_EXPENSE = [
     "Подписки",
     "Накопления",
 ]
-DEFAULT_INCOME = ["Зарплата", "Дивиденды", "Возврат", "Подарок", "Проценты"]
+DEFAULT_INCOME = ["Доходы", "Зарплата", "Дивиденды", "Возврат", "Подарок", "Проценты"]
 
 app = FastAPI(title="Личные финансы", version="1.0.0")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -437,6 +437,37 @@ async def leave_unlabeled(request: Request) -> dict:
         "review_count": remaining,
         "telegram_sent": telegram_sent,
         "category": UNLABELED_CATEGORY,
+    }
+
+
+@app.post("/api/review/income")
+async def accept_all_income() -> dict:
+    rows = store.accept_all_income()
+    remaining = store.review_count()
+    telegram_sent = False
+    if remaining == 0 and rows:
+        posted = str(rows[-1].get("posted_date") or date.today().isoformat())
+        d = date.fromisoformat(posted[:10])
+        date_from, date_to = _period(d.year, d.month)
+        summary = store.summary(date_from, date_to)
+        prev_from, prev_to = store.previous_period(date_from, date_to)
+        previous = store.summary(prev_from, prev_to)
+        try:
+            telegram_sent = bool(
+                send_after_review_cleared(
+                    store,
+                    summary=summary,
+                    previous=previous if previous["tx_count"] else None,
+                )
+            )
+        except Exception:
+            telegram_sent = False
+    return {
+        "ok": True,
+        "count": len(rows),
+        "review_count": remaining,
+        "telegram_sent": telegram_sent,
+        "category": INCOME_CATEGORY,
     }
 
 

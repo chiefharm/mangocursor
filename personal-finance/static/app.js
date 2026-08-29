@@ -206,6 +206,7 @@ function reviewView() {
         </div>
         <button class="primary" id="save-review" style="width:100%;margin-top:14px">Сохранить</button>
         <button class="ghost" id="leave-unlabeled" style="width:100%;margin-top:8px">Оставить неразмеченным</button>
+        ${pendingIncome(items).length ? `<button class="primary income-all" id="accept-income-all" style="width:100%;margin-top:8px">Зачислить все доходы</button>` : ""}
         <div class="error" id="review-error" hidden></div>
       </section>
       ${tabBar()}
@@ -214,6 +215,8 @@ function reviewView() {
 
 function queueView() {
   const pending = state.review?.transactions || [];
+  const inflows = pendingIncome(pending);
+  const inflowSum = inflows.reduce((acc, t) => acc + Number(t.amount || 0), 0);
   const s = state.summary?.summary;
   return `
     <div class="app-shell">
@@ -225,7 +228,11 @@ function queueView() {
         ? "Все неразобранные переводы здесь. Откройте любой или оставьте без статьи."
         : "Очереди нет. Неразмеченные за месяц — ниже, если они есть."}</p>
       ${pending.length ? `
-        <button class="ghost" id="unlabel-all" style="width:100%;margin:8px 0 12px">Оставить все неразмеченными</button>
+        <div class="queue-actions">
+          ${inflows.length ? `<button class="primary income-all" id="accept-income-all">Зачислить все доходы</button>
+          <p class="hint">${inflows.length} ${plural(inflows.length, "поступление", "поступления", "поступлений")} · ${money(inflowSum, true)}</p>` : ""}
+          <button class="ghost" id="unlabel-all">Оставить все неразмеченными</button>
+        </div>
         <section class="card">
           ${pending.map((t) => txRow(t, "open-review")).join("")}
         </section>` : `<p class="empty">Пока нечего разбирать позже</p>`}
@@ -245,6 +252,10 @@ function tabBar() {
         ${n ? `<span class="tab-badge">${n > 99 ? "99+" : n}</span>` : ""}
       </button>
     </nav>`;
+}
+
+function pendingIncome(items) {
+  return (items || []).filter((t) => Number(t.amount) > 0);
 }
 
 function unlabeledCard(s) {
@@ -429,6 +440,30 @@ async function showQueue() {
   await loadSummary();
 }
 
+async function acceptAllIncome() {
+  const n = pendingIncome(state.review?.transactions).length;
+  if (!n) {
+    alert("В очереди нет входящих переводов");
+    return;
+  }
+  if (!confirm("Все плюсовые операции станут доходом. Минусовые останутся в очереди.")) return;
+  try {
+    const res = await api("/api/review/income", { method: "POST" });
+    state.notice = res.count
+      ? `${res.count} ${plural(res.count, "перевод", "перевода", "переводов")} зачислены в доходы`
+      : "Плюсовых в очереди нет";
+    if (res.telegram_sent) state.notice += " · отчёт в Telegram";
+    state.reviewId = null;
+    await showQueue();
+  } catch (err) {
+    alert(err.data?.detail || err.message || "Не сохранилось");
+  }
+}
+
+function bindAcceptIncome() {
+  $("#accept-income-all")?.addEventListener("click", () => acceptAllIncome());
+}
+
 function bindQueue() {
   bindTabs();
   document.querySelectorAll("[data-open]").forEach((el) => {
@@ -452,6 +487,7 @@ function bindQueue() {
       alert(err.data?.detail || err.message || "Не сохранилось");
     }
   });
+  bindAcceptIncome();
 }
 
 function bindReview() {
@@ -460,6 +496,7 @@ function bindReview() {
     state.reviewId = null;
     showQueue();
   });
+  bindAcceptIncome();
   const card = $("#review-card");
   if (!card) return;
   const items = state.review?.transactions || [];

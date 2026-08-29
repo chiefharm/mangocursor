@@ -65,3 +65,31 @@ def test_leave_unlabeled_parks_outside_queue(tmp_path: Path) -> None:
     names = {c["name"] for c in summary["expense_by_category"]}
     assert "Переводы без разметки" not in names
     assert "Подарки" not in names
+
+
+MIXED_SBP = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+17.08.2026 10:00:00;17.08.2026;*1111;OK;-1000,00;RUB;-1000,00;RUB;;Переводы;;СБП исходящий
+17.08.2026 12:00:00;17.08.2026;*1111;OK;34667,00;RUB;34667,00;RUB;;Переводы;;СБП входящий
+17.08.2026 14:00:00;17.08.2026;*1111;OK;2680,00;RUB;2680,00;RUB;;Переводы;;СБП входящий 2
+"""
+
+
+def test_accept_all_income_leaves_outflows(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(MIXED_SBP)), "sbp.csv")
+    pending = store.list_transactions(needs_review=True)
+    assert len(pending) == 3
+    accepted = store.accept_all_income()
+    assert len(accepted) == 2
+    assert all(float(row["amount"]) > 0 for row in accepted)
+    assert all(row["kind"] == "income" for row in accepted)
+    leftover = store.list_transactions(needs_review=True)
+    assert len(leftover) == 1
+    assert leftover[0]["amount"] == -1000
+    summary = store.summary("2026-08-01", "2026-08-31")
+    assert summary["unreviewed_count"] == 1
+    assert summary["income"] == 34667 + 2680
+    names = {c["name"]: c["amount"] for c in summary["income_by_category"]}
+    assert names["Доходы"] == 34667 + 2680
+

@@ -13,6 +13,7 @@ from typing import Any
 from .parse import ParsedTx
 
 UNLABELED_CATEGORY = "Переводы без разметки"
+INCOME_CATEGORY = "Доходы"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS imports (
@@ -284,6 +285,22 @@ class FinanceStore:
         out = []
         for row in pending:
             out.append(self.review_transaction(int(row["id"]), kind="unlabeled"))
+        return out
+
+    def accept_all_income(self) -> list[dict[str, Any]]:
+        """Mark every queued inflow as income; leave outflows in the queue."""
+        pending = self.list_transactions(needs_review=True, limit=2000)
+        out = []
+        for row in pending:
+            if float(row.get("amount") or 0) <= 0:
+                continue
+            out.append(
+                self.review_transaction(
+                    int(row["id"]),
+                    kind="income",
+                    user_category=INCOME_CATEGORY,
+                )
+            )
         return out
 
     def categories(self) -> dict[str, list[str]]:

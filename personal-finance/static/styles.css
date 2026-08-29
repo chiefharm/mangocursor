@@ -441,6 +441,18 @@ textarea, .text-input {
   font-size: 32px;
   line-height: 1;
 }
+.queue-actions {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.queue-actions .hint { margin: 0; }
+button.income-all {
+  width: 100%;
+  background: var(--in);
+  border-color: var(--in);
+  color: #f4faf6;
+}
 .tx-row {
   display: flex;
   align-items: flex-start;

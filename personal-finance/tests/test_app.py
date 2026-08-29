@@ -99,3 +99,26 @@ def test_leave_unlabeled_via_api(client: TestClient) -> None:
     assert summary["unreviewed_count"] == 0
     assert summary["unlabeled_count"] == 1
     assert summary["unlabeled"][0]["user_category"] == "Переводы без разметки"
+
+
+def test_accept_all_income_via_api(client: TestClient) -> None:
+    from tests.test_store import MIXED_SBP
+
+    path = _write(MIXED_SBP)
+    with path.open("rb") as fh:
+        client.post("/api/import", files={"file": ("sbp.csv", fh, "text/csv")})
+    assert client.get("/api/review").json()["count"] == 3
+    res = client.post("/api/review/income")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["count"] == 2
+    assert body["review_count"] == 1
+    assert body["category"] == "Доходы"
+    leftover = client.get("/api/review").json()["transactions"]
+    assert len(leftover) == 1
+    assert leftover[0]["amount"] == -1000
+    summary = client.get("/api/summary?year=2026&month=8").json()["summary"]
+    assert summary["unreviewed_count"] == 1
+    names = {c["name"]: c["amount"] for c in summary["income_by_category"]}
+    assert names["Доходы"] == 34667 + 2680
+
