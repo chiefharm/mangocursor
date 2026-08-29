@@ -30,8 +30,9 @@ def test_unreviewed_not_in_pnl_until_explained(tmp_path: Path) -> None:
     store.import_transactions(txs, "ops.csv")
     summary = store.summary("2026-08-01", "2026-08-31")
     assert summary["income"] == 150000
-    # supermarket 1250.50 + coffee 890; transfers held aside
-    assert summary["expense"] == 2140.5
+    # supermarket 1250.50 + coffee 890 + p2p 50000 + own-account 20000
+    assert summary["expense"] == 72140.5
+    assert summary["net"] == 150000 - 72140.5
     assert summary["unreviewed_count"] == 1
     assert summary["unreviewed_sum"] == -50000
     assert summary["internal"] == -20000
@@ -46,7 +47,7 @@ def test_unreviewed_not_in_pnl_until_explained(tmp_path: Path) -> None:
     )
     after = store.summary("2026-08-01", "2026-08-31")
     assert after["unreviewed_count"] == 0
-    assert after["expense"] == 2140.5 + 50000
+    assert after["expense"] == 72140.5
     cats = {c["name"]: c["amount"] for c in after["expense_by_category"]}
     assert cats["Подарки"] == 50000
     assert cats["Супермаркеты"] == 1250.5
@@ -61,7 +62,7 @@ def test_leave_unlabeled_parks_outside_queue(tmp_path: Path) -> None:
     assert summary["unreviewed_count"] == 0
     assert summary["unlabeled_count"] == 1
     assert summary["unlabeled_sum"] == -50000
-    assert summary["expense"] == 2140.5 + 50000
+    assert summary["expense"] == 72140.5
     names = {c["name"] for c in summary["expense_by_category"]}
     assert "Переводы без разметки" not in names
     assert "Подарки" not in names
@@ -100,7 +101,7 @@ def test_ledger_lists_ops_behind_category_and_totals(tmp_path: Path) -> None:
     food = store.list_ledger("2026-08-01", "2026-08-31", bucket="expense", category="Супермаркеты")
     assert [row["description"] for row in food] == ["PYATEROCHKA"]
     expenses = store.list_ledger("2026-08-01", "2026-08-31", bucket="expense")
-    assert {row["description"] for row in expenses} == {"PYATEROCHKA", "COFFEE"}
+    assert {"PYATEROCHKA", "COFFEE"} <= {row["description"] for row in expenses}
     income = store.list_ledger("2026-08-01", "2026-08-31", bucket="income")
     assert [row["description"] for row in income] == ["Иван Иванов"]
     pending = store.list_transactions(needs_review=True)

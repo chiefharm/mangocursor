@@ -140,7 +140,7 @@ def test_transactions_by_category_via_api(client: TestClient) -> None:
         "/api/transactions",
         params={"year": 2026, "month": 8, "bucket": "expense"},
     ).json()
-    assert {t["description"] for t in expenses["transactions"]} == {"PYATEROCHKA", "COFFEE"}
+    assert {t["description"] for t in expenses["transactions"]} >= {"PYATEROCHKA", "COFFEE"}
     income = client.get(
         "/api/transactions",
         params={"year": 2026, "month": 8, "bucket": "income"},

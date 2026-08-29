@@ -102,7 +102,9 @@ function homeView() {
   const maxInc = Math.max(1, ...(s?.income_by_category || []).map((c) => c.amount));
   const delta = prev && prev.tx_count
     ? `К прошлому месяцу: доходы ${cmp(s.income, prev.income)}, расходы ${cmp(s.expense, prev.expense)}`
-    : "Загрузите выписку — посчитаю доходы, расходы и статьи банка.";
+    : (s && s.tx_count
+      ? "Все поступления минус все списания по выписке — как изменился остаток счёта."
+      : "Загрузите выписку — посчитаю, как изменился остаток.");
   const showLogout = Boolean(state.me.auth_required);
   return `
     <div class="app-shell">
@@ -130,7 +132,7 @@ function homeView() {
           <button class="primary" id="go-review">Разобрать</button>
         </div>` : ""}
       <section class="hero">
-        <div class="label">Сальдо за месяц</div>
+        <div class="label">Сальдо счёта</div>
         <p class="net serif ${net >= 0 ? "pos" : "neg"}">${s ? money(net, true) : "—"}</p>
         ${renderGoalMeter(s)}
         <div class="split">
@@ -600,7 +602,7 @@ function bindEditOp() {
     const list = [...new Set([
       ...(mode === "income" ? cats.income : cats.expense),
       chosen,
-    ].filter((name) => name && name !== "Переводы без разметки"))];
+    ].filter((name) => name && name !== "Переводы без разметки" && name !== "Не разобрано"))];
     chips.innerHTML = list.map((name) =>
       `<button type="button" class="chip ${chosen === name ? "on" : ""}" data-cat="${esc(name)}">${esc(name)}</button>`
     ).join("");
@@ -785,7 +787,7 @@ function bindReview() {
 
   const paintChips = () => {
     const list = (mode === "income" ? cats.income : cats.expense)
-      .filter((name) => name !== "Переводы без разметки");
+      .filter((name) => name !== "Переводы без разметки" && name !== "Не разобрано");
     chips.innerHTML = list.map((name) =>
       `<button type="button" class="chip ${chosen === name ? "on" : ""}" data-cat="${esc(name)}">${esc(name)}</button>`
     ).join("");

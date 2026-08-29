@@ -14,6 +14,8 @@ from .parse import ParsedTx
 
 UNLABELED_CATEGORY = "Переводы без разметки"
 INCOME_CATEGORY = "Доходы"
+INTERNAL_CATEGORY = "Между своими"
+UNREVIEWED_CATEGORY = "Не разобрано"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS imports (
@@ -501,18 +503,18 @@ def effective_category(row: dict[str, Any]) -> str:
 
 
 def classify_pnl(row: dict[str, Any]) -> tuple[str | None, str]:
-    """Return (bucket, category). bucket is income/expense, or None if excluded."""
-    if int(row.get("needs_review") or 0) == 1:
-        return None, ""
+    """Income/expense by sign, as on the statement. Nothing is dropped from сальдо."""
     amount = float(row["amount"])
-    if (row.get("kind") == "unlabeled") or (row.get("user_category") == UNLABELED_CATEGORY):
-        return ("income" if amount > 0 else "expense"), UNLABELED_CATEGORY
-    if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
+    if abs(amount) < 0.0001:
         return None, ""
-    cat = effective_category(row)
-    if amount > 0 or row.get("kind") == "income":
-        return "income", cat
-    return "expense", cat
+    bucket = "income" if amount > 0 else "expense"
+    if (row.get("kind") == "unlabeled") or (row.get("user_category") == UNLABELED_CATEGORY):
+        return bucket, UNLABELED_CATEGORY
+    if int(row.get("needs_review") or 0) == 1:
+        return bucket, UNREVIEWED_CATEGORY
+    if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
+        return bucket, INTERNAL_CATEGORY
+    return bucket, effective_category(row)
 
 
 def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> dict[str, Any]:
@@ -530,29 +532,27 @@ def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> d
 
     for row in txs:
         amount = float(row["amount"])
+        if amount > 0:
+            income += amount
+        elif amount < 0:
+            expense += abs(amount)
         if int(row.get("needs_review") or 0) == 1:
             unreviewed_count += 1
             unreviewed_sum += amount
             pending.append(public_tx(row))
-            continue
+        if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
+            if int(row.get("needs_review") or 0) != 1:
+                internal += amount
         bucket, cat = classify_pnl(row)
         if bucket is None:
-            if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
-                internal += amount
             continue
         if cat == UNLABELED_CATEGORY:
             unlabeled.append(public_tx(row))
             unlabeled_sum += amount
-            if bucket == "income":
-                income += abs(amount)
-            else:
-                expense += abs(amount)
             continue
         if bucket == "income":
-            income += abs(amount)
             income_cats[cat] = income_cats.get(cat, 0.0) + abs(amount)
         else:
-            expense += abs(amount)
             expense_cats[cat] = expense_cats.get(cat, 0.0) + abs(amount)
 
     return {
