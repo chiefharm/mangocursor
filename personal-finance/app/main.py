@@ -55,6 +55,10 @@ DEFAULT_INCOME = ["Зарплата", "Дивиденды", "Возврат", "�
 app = FastAPI(title="Личные финансы", version="1.0.0")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 store = FinanceStore(DB_PATH)
+if os.getenv("FINANCE_DEMO", "").strip() in {"1", "true", "yes"}:
+    from .demo import seed_if_empty
+
+    seed_if_empty(store)
 
 
 def reset_data_dir(path: str | Path) -> None:
@@ -66,6 +70,10 @@ def reset_data_dir(path: str | Path) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     store = FinanceStore(DB_PATH)
+    if os.getenv("FINANCE_DEMO", "").strip() in {"1", "true", "yes"}:
+        from .demo import seed_if_empty
+
+        seed_if_empty(store)
 
 
 def _password() -> str:
@@ -87,6 +95,10 @@ def _secret() -> bytes:
 
 def _auth_off() -> bool:
     return os.getenv("FINANCE_AUTH", "on").strip().lower() in {"0", "false", "no", "off"}
+
+
+def _demo() -> bool:
+    return os.getenv("FINANCE_DEMO", "").strip().lower() in {"1", "true", "yes"}
 
 
 def _sign(payload: str) -> str:
@@ -154,6 +166,7 @@ async def me(request: Request) -> dict:
         "auth_required": bool(_password()) and not _auth_off(),
         "review_count": store.review_count() if _is_authed(request) else 0,
         "telegram": tg.telegram_enabled(),
+        "demo": _demo(),
     }
 
 

@@ -1,5 +1,6 @@
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = document.getElementById("app");
+const MONTHS = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 
 const state = {
   me: null,
@@ -76,7 +77,6 @@ function loginView() {
 function homeView() {
   const s = state.summary?.summary;
   const prev = state.summary?.previous;
-  const title = state.summary?.title || "";
   const reviewN = s?.unreviewed_count || 0;
   const net = s ? s.net : 0;
   const maxExp = Math.max(1, ...(s?.expense_by_category || []).map((c) => c.amount));
@@ -84,20 +84,26 @@ function homeView() {
   const delta = prev && prev.tx_count
     ? `К прошлому месяцу: доходы ${cmp(s.income, prev.income)}, расходы ${cmp(s.expense, prev.expense)}`
     : "Загрузите выписку — посчитаю доходы, расходы и статьи банка.";
+  const showLogout = Boolean(state.me.auth_required);
   return `
     <div class="app-shell">
+      ${state.me.demo ? `<p class="demo-ribbon">Демо · цифры выдуманные</p>` : ""}
       <div class="topbar">
         <div class="brand">Касса</div>
         <div class="top-actions">
           <button class="ghost" id="notify-btn" ${state.me.telegram ? "" : "hidden"}>В Telegram</button>
-          <button class="ghost" id="logout-btn">Выйти</button>
+          <button class="ghost" id="logout-btn" ${showLogout ? "" : "hidden"}>Выйти</button>
         </div>
       </div>
       <div class="month-nav">
         <button class="icon-btn" id="prev-month" aria-label="Предыдущий месяц">←</button>
-        <h1>${esc(title)}</h1>
+        <div class="month-title">
+          <h1>${esc(MONTHS[state.month] || "")}</h1>
+          <div class="year">${state.year}</div>
+        </div>
         <button class="icon-btn" id="next-month" aria-label="Следующий месяц">→</button>
       </div>
+      <div class="rule"></div>
       ${state.notice ? `<p class="ok">${esc(state.notice)}</p>` : ""}
       ${reviewN ? `
         <div class="banner">
@@ -107,6 +113,7 @@ function homeView() {
       <section class="hero">
         <div class="label">Сальдо за месяц</div>
         <p class="net serif ${net >= 0 ? "pos" : "neg"}">${s ? money(net, true) : "—"}</p>
+        ${renderGoalMeter(s)}
         <div class="split">
           <div class="kpi in"><div class="k">Доходы</div><div class="v">${s ? money(s.income) : "—"}</div></div>
           <div class="kpi out"><div class="k">Расходы</div><div class="v">${s ? money(s.expense) : "—"}</div></div>
@@ -115,28 +122,37 @@ function homeView() {
         ${s && s.unreviewed_count ? `<div class="delta">Не разнесено: ${money(Math.abs(s.unreviewed_sum))} (${s.unreviewed_count})</div>` : ""}
       </section>
       <section class="card">
-        <h2>Цель месяца</h2>
-        <p class="hint">Сальдо, которое хотите видеть по итогам месяца. Отчёт в группу с советами уйдёт после разнесения переводов.</p>
+        <div class="card-head">
+          <h2>Цель месяца</h2>
+          <span class="muted">${daysLeftLabel()}</span>
+        </div>
+        <p class="hint">Сальдо, которое хотите видеть по итогам месяца. Отчёт в группу уйдёт после разнесения переводов.</p>
         ${renderGoal(s)}
       </section>
       <section class="card">
         <h2>Загрузить выписку</h2>
         <label class="drop" id="drop">
-          <strong>CSV или Excel из банка</strong>
-          <p>Тинькофф, Сбер, Альфа — файл, где есть дата, сумма и категория</p>
+          <strong>Вложить выписку</strong>
+          <p>CSV или Excel — Тинькофф, Сбер, Альфа</p>
           <input id="file" type="file" accept=".csv,.xlsx,.xls,.txt" />
         </label>
-        <p class="hint">Переводы между счетами обычно без статьи расходов. После загрузки откроется очередь: для каждого перевода можно написать, куда ушли деньги, или пометить «между своими».</p>
+        <p class="hint">Переводы между счетами обычно без статьи. После загрузки откроется очередь: куда ушли деньги или «между своими».</p>
         <div class="error" id="upload-error" hidden></div>
       </section>
       <section class="card">
-        <h2>Расходы по статьям</h2>
-        ${renderBars(s?.expense_by_category, maxExp, "out") || `<p class="empty">Пока пусто</p>`}
+        <div class="card-head">
+          <h2>Расходы</h2>
+          <span class="muted">${s ? money(s.expense) : ""}</span>
+        </div>
+        ${renderBars(s?.expense_by_category, maxExp, "out", s?.expense) || `<p class="empty">Пока пусто</p>`}
         ${renderSpikes()}
       </section>
       <section class="card">
-        <h2>Доходы</h2>
-        ${renderBars(s?.income_by_category, maxInc, "in") || `<p class="empty">Пока пусто</p>`}
+        <div class="card-head">
+          <h2>Доходы</h2>
+          <span class="muted">${s ? money(s.income) : ""}</span>
+        </div>
+        ${renderBars(s?.income_by_category, maxInc, "in", s?.income) || `<p class="empty">Пока пусто</p>`}
       </section>
     </div>`;
 }
@@ -153,12 +169,18 @@ function reviewView() {
       </div>`;
   }
   const amtClass = current.amount < 0 ? "neg" : "pos";
+  const total = Math.max(left, state.me.review_count || left);
+  const done = Math.max(0, total - left);
+  const dots = Array.from({ length: Math.min(total, 8) }, (_, i) =>
+    `<span class="${i < done ? "on" : ""}"></span>`
+  ).join("");
   return `
     <div class="app-shell">
       <div class="topbar">
         <div class="brand">Осталось ${left}</div>
         <button class="ghost" id="back-home">К сводке</button>
       </div>
+      <div class="progress-dots">${dots}</div>
       <section class="hero">
         <div class="label">${fmtDate(current.posted_date)}</div>
         <p class="net serif ${amtClass}">${money(current.amount, true)}</p>
@@ -180,6 +202,21 @@ function reviewView() {
         <button class="primary" id="save-review" style="width:100%;margin-top:14px">Сохранить</button>
         <div class="error" id="review-error" hidden></div>
       </section>
+    </div>`;
+}
+
+function renderGoalMeter(s) {
+  const goal = state.summary?.goal;
+  if (!goal || !s) return "";
+  const pct = Math.max(0, Math.min(100, (s.net / goal.amount) * 100));
+  const cls = s.net >= goal.amount ? "over" : "under";
+  return `
+    <div class="meter-wrap">
+      <div class="meter" title="До цели"><div class="meter-fill ${cls}" style="width:${pct}%"></div></div>
+      <div class="meter-cap">
+        <span>${Math.round(pct)}% от цели</span>
+        <span>${money(goal.amount)}</span>
+      </div>
     </div>`;
 }
 
@@ -209,8 +246,10 @@ function renderSpikes() {
   if (spikes.length) {
     html += `<h2 style="margin-top:18px">Сильно выросли</h2>`;
     html += spikes.map((row) => `
-      <div class="bar-row">
-        <div class="meta"><span>${esc(row.name)}</span><span>+${money(row.diff)}</span></div>
+      <div class="ledger-row">
+        <span class="name">${esc(row.name)} <span class="spike-tag">выросло</span></span>
+        <span class="dots"></span>
+        <span class="amt">+${money(row.diff)}</span>
       </div>`).join("");
   }
   if (recs.length) {
@@ -220,13 +259,33 @@ function renderSpikes() {
   return html;
 }
 
-function renderBars(rows, max, kind) {
+function renderBars(rows, max, kind, total) {
   if (!rows || !rows.length) return "";
-  return rows.map((row) => `
-    <div class="bar-row">
-      <div class="meta"><span>${esc(row.name)}</span><span>${money(row.amount)}</span></div>
+  const sum = total || rows.reduce((a, r) => a + r.amount, 0) || 1;
+  return rows.map((row) => {
+    const share = Math.round((row.amount / sum) * 100);
+    return `
+    <div>
+      <div class="ledger-row">
+        <span class="name">${esc(row.name)}</span>
+        <span class="dots"></span>
+        <span class="share">${share}%</span>
+        <span class="amt">${money(row.amount)}</span>
+      </div>
       <div class="track"><div class="fill ${kind}" style="width:${Math.max(6, (row.amount / max) * 100)}%"></div></div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
+}
+
+function daysLeftLabel() {
+  const last = new Date(state.year, state.month, 0).getDate();
+  const today = new Date();
+  if (today.getFullYear() !== state.year || today.getMonth() + 1 !== state.month) {
+    return `${last} ${plural(last, "день", "дня", "дней")}`;
+  }
+  const left = last - today.getDate();
+  if (left <= 0) return "последний день";
+  return `ещё ${left} ${plural(left, "день", "дня", "дней")}`;
 }
 
 function bindLogin() {
@@ -322,7 +381,7 @@ function bindReview() {
   $("#save-review").addEventListener("click", async () => {
     const note = $("#note").value.trim();
     const custom = $("#custom-cat")?.value.trim();
-    const user_category = mode === "transfer" ? (note ? "Между своими" : "Между своими") : (custom || chosen);
+    const user_category = mode === "transfer" ? "Между своими" : (custom || chosen);
     if (mode !== "transfer" && !user_category) {
       const box = $("#review-error");
       box.hidden = false;
