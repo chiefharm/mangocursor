@@ -11,6 +11,7 @@ const state = {
   reviewId: null,
   view: "home",
   notice: "",
+  ops: null,
 };
 
 const money = (n, signed = false) => {
@@ -60,6 +61,11 @@ function render() {
   if (state.view === "queue") {
     app.innerHTML = queueView();
     bindQueue();
+    return;
+  }
+  if (state.view === "ops") {
+    app.innerHTML = opsView();
+    bindOps();
     return;
   }
   app.innerHTML = homeView();
@@ -121,8 +127,14 @@ function homeView() {
         <p class="net serif ${net >= 0 ? "pos" : "neg"}">${s ? money(net, true) : "—"}</p>
         ${renderGoalMeter(s)}
         <div class="split">
-          <div class="kpi in"><div class="k">Доходы</div><div class="v">${s ? money(s.income) : "—"}</div></div>
-          <div class="kpi out"><div class="k">Расходы</div><div class="v">${s ? money(s.expense) : "—"}</div></div>
+          <button type="button" class="kpi in" data-ops="income"${s && s.income ? "" : " disabled"}>
+            <div class="k">Доходы</div>
+            <div class="v">${s ? money(s.income) : "—"}</div>
+          </button>
+          <button type="button" class="kpi out" data-ops="expense"${s && s.expense ? "" : " disabled"}>
+            <div class="k">Расходы</div>
+            <div class="v">${s ? money(s.expense) : "—"}</div>
+          </button>
         </div>
         <div class="delta">${esc(delta)}</div>
         ${s && s.unreviewed_count ? `<div class="delta">Не разнесено: ${money(Math.abs(s.unreviewed_sum))} (${s.unreviewed_count})</div>` : ""}
@@ -148,19 +160,19 @@ function homeView() {
         <div class="error" id="upload-error" hidden></div>
       </section>
       <section class="card">
-        <div class="card-head">
+        <button type="button" class="card-head hit" data-ops="expense"${s && s.expense ? "" : " disabled"}>
           <h2>Расходы</h2>
-          <span class="muted">${s ? money(s.expense) : ""}</span>
-        </div>
-        ${renderBars(s?.expense_by_category, maxExp, "out", s?.expense) || `<p class="empty">Пока пусто</p>`}
+          <span class="muted">${s ? money(s.expense) : ""} ›</span>
+        </button>
+        ${renderBars(s?.expense_by_category, maxExp, "expense", s?.expense) || `<p class="empty">Пока пусто</p>`}
         ${renderSpikes()}
       </section>
       <section class="card">
-        <div class="card-head">
+        <button type="button" class="card-head hit" data-ops="income"${s && s.income ? "" : " disabled"}>
           <h2>Доходы</h2>
-          <span class="muted">${s ? money(s.income) : ""}</span>
-        </div>
-        ${renderBars(s?.income_by_category, maxInc, "in", s?.income) || `<p class="empty">Пока пусто</p>`}
+          <span class="muted">${s ? money(s.income) : ""} ›</span>
+        </button>
+        ${renderBars(s?.income_by_category, maxInc, "income", s?.income) || `<p class="empty">Пока пусто</p>`}
       </section>
       ${unlabeledCard(s)}
       ${tabBar()}
@@ -244,9 +256,10 @@ function queueView() {
 function tabBar() {
   const n = Number(state.review?.count ?? state.summary?.summary?.unreviewed_count ?? 0);
   const onQueue = state.view === "queue" || state.view === "review";
+  const onHome = state.view === "home" || state.view === "ops";
   return `
     <nav class="tabbar">
-      <button type="button" class="tab ${state.view === "home" ? "on" : ""}" id="tab-home">Сводка</button>
+      <button type="button" class="tab ${onHome ? "on" : ""}" id="tab-home">Сводка</button>
       <button type="button" class="tab ${onQueue ? "on" : ""} ${n ? "hot" : ""}" id="tab-queue">
         Разобрать позже
         ${n ? `<span class="tab-badge">${n > 99 ? "99+" : n}</span>` : ""}
@@ -272,16 +285,41 @@ function unlabeledCard(s) {
     </section>`;
 }
 
-function txRow(t, action) {
+function opsView() {
+  const ops = state.ops || {};
+  const rows = ops.transactions || [];
+  const title = ops.title || "Операции";
+  const showCat = !ops.category;
+  return `
+    <div class="app-shell">
+      <div class="topbar">
+        <button class="ghost" id="ops-back">Назад</button>
+        <div class="brand">Касса</div>
+      </div>
+      <h1 class="queue-title serif">${esc(title)}</h1>
+      <p class="hint">${ops.loading
+        ? "Загрузка…"
+        : `${rows.length} ${plural(rows.length, "операция", "операции", "операций")} · ${money(ops.sum || 0)}`}</p>
+      ${rows.length ? `
+        <section class="card">
+          ${rows.map((t) => txRow(t, "", showCat)).join("")}
+        </section>` : (ops.loading ? "" : `<p class="empty">Операций нет</p>`)}
+      ${tabBar()}
+    </div>`;
+}
+
+function txRow(t, action, showCat) {
   const cls = t.amount < 0 ? "neg" : "pos";
   const open = action ? ` data-open="${t.id}"` : "";
   const tag = action ? "button" : "div";
   const type = action ? ` type="button"` : "";
+  const cat = (t.user_category || t.bank_category || "").trim();
+  const sub = [fmtDate(t.posted_date), showCat && cat ? cat : ""].filter(Boolean).join(" · ");
   return `
     <${tag} class="tx-row"${type}${open}>
       <div>
         <div class="tx-desc">${esc(t.description || "Перевод")}</div>
-        <div class="tx-sub">${esc(fmtDate(t.posted_date))}</div>
+        <div class="tx-sub">${esc(sub)}</div>
       </div>
       <div class="tx-amt ${cls}">${money(t.amount, true)}</div>
     </${tag}>`;
@@ -328,11 +366,11 @@ function renderSpikes() {
   if (spikes.length) {
     html += `<h2 style="margin-top:18px">Сильно выросли</h2>`;
     html += spikes.map((row) => `
-      <div class="ledger-row">
+      <button type="button" class="ledger-row cat-hit" data-ops="expense" data-cat="${esc(row.name)}">
         <span class="name">${esc(row.name)} <span class="spike-tag">выросло</span></span>
         <span class="dots"></span>
         <span class="amt">+${money(row.diff)}</span>
-      </div>`).join("");
+      </button>`).join("");
   }
   if (recs.length) {
     html += `<h2 style="margin-top:18px">К цели</h2>`;
@@ -341,21 +379,22 @@ function renderSpikes() {
   return html;
 }
 
-function renderBars(rows, max, kind, total) {
+function renderBars(rows, max, bucket, total) {
   if (!rows || !rows.length) return "";
   const sum = total || rows.reduce((a, r) => a + r.amount, 0) || 1;
+  const fill = bucket === "income" ? "in" : "out";
   return rows.map((row) => {
     const share = Math.round((row.amount / sum) * 100);
     return `
-    <div>
+    <button type="button" class="cat-hit" data-ops="${bucket}" data-cat="${esc(row.name)}">
       <div class="ledger-row">
         <span class="name">${esc(row.name)}</span>
         <span class="dots"></span>
         <span class="share">${share}%</span>
         <span class="amt">${money(row.amount)}</span>
       </div>
-      <div class="track"><div class="fill ${kind}" style="width:${Math.max(6, (row.amount / max) * 100)}%"></div></div>
-    </div>`;
+      <div class="track"><div class="fill ${fill}" style="width:${Math.max(6, (row.amount / max) * 100)}%"></div></div>
+    </button>`;
   }).join("");
 }
 
@@ -422,6 +461,55 @@ function bindHome() {
   });
   file?.addEventListener("change", () => { if (file.files[0]) upload(file.files[0]); });
   $("#pull-drive")?.addEventListener("click", pullDrive);
+  bindOpsHits();
+}
+
+function bindOpsHits() {
+  document.querySelectorAll("[data-ops]").forEach((el) => {
+    el.addEventListener("click", () => {
+      if (el.disabled) return;
+      showOps(el.getAttribute("data-ops"), el.getAttribute("data-cat") || "");
+    });
+  });
+}
+
+function bindOps() {
+  bindTabs();
+  $("#ops-back")?.addEventListener("click", () => {
+    state.view = "home";
+    state.ops = null;
+    render();
+  });
+}
+
+async function showOps(bucket, category) {
+  const cat = (category || "").trim();
+  const title = cat || (bucket === "income" ? "Доходы" : "Расходы");
+  state.view = "ops";
+  state.ops = { bucket, category: cat, title, transactions: [], sum: 0, loading: true };
+  render();
+  const q = new URLSearchParams({
+    year: String(state.year),
+    month: String(state.month),
+    bucket,
+    limit: "2000",
+  });
+  if (cat) q.set("category", cat);
+  try {
+    const res = await api(`/api/transactions?${q}`);
+    state.ops = {
+      bucket,
+      category: cat,
+      title,
+      transactions: res.transactions || [],
+      sum: res.sum || 0,
+      loading: false,
+    };
+  } catch (err) {
+    state.ops = { bucket, category: cat, title, transactions: [], sum: 0, loading: false };
+    state.notice = err.data?.detail || err.message || "Не удалось открыть операции";
+  }
+  render();
 }
 
 function bindTabs() {

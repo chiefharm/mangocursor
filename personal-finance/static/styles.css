@@ -210,6 +210,16 @@ button:active { transform: translateY(1px); }
   border-radius: 16px;
   padding: 12px 14px;
 }
+button.kpi {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+}
+button.kpi:disabled { opacity: 0.55; }
 .kpi .k { font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
 .kpi .v { font-size: 20px; margin-top: 4px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .kpi.out .v { color: var(--out); }
@@ -255,6 +265,37 @@ button:active { transform: translateY(1px); }
 }
 .card-head h2 { margin: 0; }
 .card-head .muted { color: var(--muted); font-size: 13px; }
+button.card-head {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+button.card-head:disabled { opacity: 0.5; }
+
+.cat-hit {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0 0 2px;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  border-radius: 12px;
+}
+button.ledger-row.cat-hit {
+  display: flex;
+  padding: 0;
+}
 
 .ledger-row {
   display: flex;

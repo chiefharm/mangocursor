@@ -326,11 +326,39 @@ async def transactions(
     year: int | None = None,
     month: int | None = None,
     needs_review: bool | None = None,
+    bucket: str | None = None,
+    category: str | None = None,
     limit: int = 400,
 ) -> dict:
     date_from = date_to = None
     if year and month:
         date_from, date_to = _period(year, month)
+    kind = (bucket or "").strip().lower()
+    cat = (category or "").strip() or None
+    if kind:
+        if kind not in {"income", "expense"}:
+            raise HTTPException(status_code=400, detail="Нужны доходы или расходы")
+        if not date_from or not date_to:
+            raise HTTPException(status_code=400, detail="Нужны год и месяц")
+        try:
+            rows = store.list_ledger(
+                date_from,
+                date_to,
+                bucket=kind,
+                category=cat,
+                limit=min(max(limit, 400), 2000),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        total = round(sum(abs(float(r["amount"])) for r in rows), 2)
+        return {
+            "ok": True,
+            "bucket": kind,
+            "category": cat,
+            "count": len(rows),
+            "sum": total,
+            "transactions": [public_tx(r) for r in rows],
+        }
     rows = store.list_transactions(
         date_from=date_from,
         date_to=date_to,

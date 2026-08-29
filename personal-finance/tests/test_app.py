@@ -122,3 +122,30 @@ def test_accept_all_income_via_api(client: TestClient) -> None:
     names = {c["name"]: c["amount"] for c in summary["income_by_category"]}
     assert names["Доходы"] == 34667 + 2680
 
+
+def test_transactions_by_category_via_api(client: TestClient) -> None:
+    path = _write(TINKOFF)
+    with path.open("rb") as fh:
+        client.post("/api/import", files={"file": ("ops.csv", fh, "text/csv")})
+    food = client.get(
+        "/api/transactions",
+        params={"year": 2026, "month": 8, "bucket": "expense", "category": "Супермаркеты"},
+    )
+    assert food.status_code == 200, food.text
+    body = food.json()
+    assert body["count"] == 1
+    assert body["transactions"][0]["description"] == "PYATEROCHKA"
+    assert body["sum"] == 1250.5
+    expenses = client.get(
+        "/api/transactions",
+        params={"year": 2026, "month": 8, "bucket": "expense"},
+    ).json()
+    assert {t["description"] for t in expenses["transactions"]} == {"PYATEROCHKA", "COFFEE"}
+    income = client.get(
+        "/api/transactions",
+        params={"year": 2026, "month": 8, "bucket": "income"},
+    ).json()
+    assert income["count"] == 1
+    assert income["transactions"][0]["description"] == "Иван Иванов"
+
+

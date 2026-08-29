@@ -93,3 +93,23 @@ def test_accept_all_income_leaves_outflows(tmp_path: Path) -> None:
     names = {c["name"]: c["amount"] for c in summary["income_by_category"]}
     assert names["Доходы"] == 34667 + 2680
 
+
+def test_ledger_lists_ops_behind_category_and_totals(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(TINKOFF)), "ops.csv")
+    food = store.list_ledger("2026-08-01", "2026-08-31", bucket="expense", category="Супермаркеты")
+    assert [row["description"] for row in food] == ["PYATEROCHKA"]
+    expenses = store.list_ledger("2026-08-01", "2026-08-31", bucket="expense")
+    assert {row["description"] for row in expenses} == {"PYATEROCHKA", "COFFEE"}
+    income = store.list_ledger("2026-08-01", "2026-08-31", bucket="income")
+    assert [row["description"] for row in income] == ["Иван Иванов"]
+    pending = store.list_transactions(needs_review=True)
+    store.leave_unlabeled(int(pending[0]["id"]))
+    after = store.list_ledger("2026-08-01", "2026-08-31", bucket="expense")
+    assert "Перевод на карту *2222" in {row["description"] for row in after}
+    still_food = store.list_ledger(
+        "2026-08-01", "2026-08-31", bucket="expense", category="Супермаркеты"
+    )
+    assert [row["description"] for row in still_food] == ["PYATEROCHKA"]
+
+

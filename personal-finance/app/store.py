@@ -235,6 +235,30 @@ class FinanceStore:
             rows = conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
 
+    def list_ledger(
+        self,
+        date_from: str,
+        date_to: str,
+        *,
+        bucket: str,
+        category: str | None = None,
+        limit: int = 2000,
+    ) -> list[dict[str, Any]]:
+        """Operations that make up an income/expense total or a category bar."""
+        if bucket not in {"income", "expense"}:
+            raise ValueError("bucket must be income or expense")
+        want = (category or "").strip()
+        rows = self.list_transactions(date_from=date_from, date_to=date_to, limit=limit)
+        out = []
+        for row in rows:
+            found, name = classify_pnl(row)
+            if found != bucket:
+                continue
+            if want and name != want:
+                continue
+            out.append(row)
+        return out
+
     def review_count(self) -> int:
         with self.connect() as conn:
             row = conn.execute(
@@ -446,6 +470,21 @@ def effective_category(row: dict[str, Any]) -> str:
     return (row.get("user_category") or row.get("bank_category") or "Без категории").strip()
 
 
+def classify_pnl(row: dict[str, Any]) -> tuple[str | None, str]:
+    """Return (bucket, category). bucket is income/expense, or None if excluded."""
+    if int(row.get("needs_review") or 0) == 1:
+        return None, ""
+    amount = float(row["amount"])
+    if (row.get("kind") == "unlabeled") or (row.get("user_category") == UNLABELED_CATEGORY):
+        return ("income" if amount > 0 else "expense"), UNLABELED_CATEGORY
+    if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
+        return None, ""
+    cat = effective_category(row)
+    if amount > 0 or row.get("kind") == "income":
+        return "income", cat
+    return "expense", cat
+
+
 def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> dict[str, Any]:
     income = 0.0
     expense = 0.0
@@ -466,19 +505,20 @@ def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> d
             unreviewed_sum += amount
             pending.append(public_tx(row))
             continue
-        if (row.get("kind") == "unlabeled") or (row.get("user_category") == UNLABELED_CATEGORY):
+        bucket, cat = classify_pnl(row)
+        if bucket is None:
+            if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
+                internal += amount
+            continue
+        if cat == UNLABELED_CATEGORY:
             unlabeled.append(public_tx(row))
             unlabeled_sum += amount
-            if amount > 0:
+            if bucket == "income":
                 income += abs(amount)
             else:
                 expense += abs(amount)
             continue
-        if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
-            internal += amount
-            continue
-        cat = effective_category(row)
-        if amount > 0 or row.get("kind") == "income":
+        if bucket == "income":
             income += abs(amount)
             income_cats[cat] = income_cats.get(cat, 0.0) + abs(amount)
         else:
