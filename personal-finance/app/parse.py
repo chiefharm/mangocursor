@@ -77,6 +77,7 @@ _DATE_FORMATS = (
     "%d.%m.%Y %H:%M:%S",
     "%d.%m.%Y %H:%M",
     "%d.%m.%Y",
+    "%d.%m.%y",
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
     "%Y-%m-%d",

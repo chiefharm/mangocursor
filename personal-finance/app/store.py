@@ -75,7 +75,12 @@ CREATE TABLE IF NOT EXISTS digests (
 """
 
 
+def tx_is_hold(tx: ParsedTx) -> bool:
+    return (tx.status or "").lower() == "hold" or bool((tx.extra or {}).get("hold"))
+
+
 def tx_uid(tx: ParsedTx) -> str:
+    hold = "hold" if tx_is_hold(tx) else ""
     key = "|".join(
         [
             tx.posted_at.strftime("%Y-%m-%d %H:%M:%S"),
@@ -84,9 +89,45 @@ def tx_uid(tx: ParsedTx) -> str:
             tx.card,
             tx.mcc,
             tx.category,
+            hold,
         ]
     )
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _amount_date_clause(holds: bool) -> str:
+    status = "LOWER(COALESCE(status, '')) = 'hold'"
+    if not holds:
+        status = "LOWER(COALESCE(status, '')) != 'hold'"
+    return f"""
+        abs(amount - ?) < 0.005
+        AND posted_date BETWEEN ? AND ?
+        AND {status}
+    """
+
+
+def _hold_window(posted: date) -> tuple[str, str]:
+    return (posted - timedelta(days=3)).isoformat(), (posted + timedelta(days=3)).isoformat()
+
+
+def _find_amount_neighbors(
+    conn: sqlite3.Connection, amount: float, posted: date, *, holds: bool
+) -> list[sqlite3.Row]:
+    date_from, date_to = _hold_window(posted)
+    return conn.execute(
+        f"SELECT id FROM transactions WHERE {_amount_date_clause(holds)}",
+        (amount, date_from, date_to),
+    ).fetchall()
+
+
+def _delete_amount_neighbors(
+    conn: sqlite3.Connection, amount: float, posted: date, *, holds: bool
+) -> None:
+    date_from, date_to = _hold_window(posted)
+    conn.execute(
+        f"DELETE FROM transactions WHERE {_amount_date_clause(holds)}",
+        (amount, date_from, date_to),
+    )
 
 
 @dataclass
@@ -145,16 +186,26 @@ class FinanceStore:
                 if existing:
                     dup_count += 1
                     continue
+                if tx_is_hold(tx) and _find_amount_neighbors(
+                    conn, tx.amount, tx.posted_date, holds=False
+                ):
+                    dup_count += 1
+                    continue
+                if not tx_is_hold(tx):
+                    _delete_amount_neighbors(
+                        conn, tx.amount, tx.posted_date, holds=True
+                    )
                 kind = tx.suggested_kind
                 is_internal = 1 if tx.suggested_internal else 0
                 needs = 1 if tx.needs_review else 0
+                extra_json = json.dumps(tx.extra or {}, ensure_ascii=False)
                 cur = conn.execute(
                     """
                     INSERT INTO transactions (
                         uid, import_id, posted_at, posted_date, amount, currency,
                         bank_category, description, mcc, card, status, kind,
                         user_category, user_note, is_internal, needs_review, extra
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, '{}')
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)
                     """,
                     (
                         uid,
@@ -171,6 +222,7 @@ class FinanceStore:
                         kind,
                         is_internal,
                         needs,
+                        extra_json,
                     ),
                 )
                 new_ids.append(int(cur.lastrowid))
@@ -595,6 +647,7 @@ def public_tx(row: dict[str, Any]) -> dict[str, Any]:
         "description": row.get("description") or "",
         "mcc": row.get("mcc") or "",
         "card": row.get("card") or "",
+        "status": row.get("status") or "",
         "kind": row.get("kind") or "expense",
         "user_category": row.get("user_category") or "",
         "user_note": row.get("user_note") or "",

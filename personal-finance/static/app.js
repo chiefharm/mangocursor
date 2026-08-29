@@ -339,7 +339,7 @@ function editOpView() {
         <div class="label">${esc(fmtDate(t.posted_date))}</div>
         <p class="net serif ${amtClass}">${money(t.amount, true)}</p>
         <p class="desc">${esc(t.description || "Без описания")}</p>
-        <p class="sub">${cat ? `Сейчас: ${esc(cat)}` : "Статья не задана"}</p>
+        <p class="sub">${isHold(t) ? "Операция в обработке · " : ""}${cat ? `Сейчас: ${esc(cat)}` : "Статья не задана"}</p>
       </section>
       <section class="card" id="edit-card" data-id="${t.id}">
         <h2>Статья</h2>
@@ -357,6 +357,10 @@ function editOpView() {
     </div>`;
 }
 
+function isHold(t) {
+  return t?.status === "hold" || Boolean(t?.extra?.hold);
+}
+
 function currentCat(t) {
   return (t?.user_category || t?.bank_category || "").trim();
 }
@@ -368,7 +372,11 @@ function txRow(t, action, showCat) {
   const tag = action ? "button" : "div";
   const type = action ? ` type="button"` : "";
   const cat = (t.user_category || t.bank_category || "").trim();
-  const sub = [fmtDate(t.posted_date), showCat && cat ? cat : ""].filter(Boolean).join(" · ");
+  const sub = [
+    fmtDate(t.posted_date),
+    showCat && cat ? cat : "",
+    isHold(t) ? "в обработке" : "",
+  ].filter(Boolean).join(" · ");
   return `
     <${tag} class="tx-row"${type}${open}>
       <div>

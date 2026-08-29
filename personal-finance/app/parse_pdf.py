@@ -23,7 +23,7 @@ _HOLD = re.compile(r"^HOLD\b")
 _AMT_ONLY = re.compile(r"^([+\-−]?\s*\d[\d \u00a0]*,\d{2})\s+RU[RB]$", re.I)
 _AMT_ANY = re.compile(r"([+\-−]?\s*\d[\d \u00a0]*,\d{2})\s+RU[RB]\b", re.I)
 _MCC = re.compile(r"MCC(\d{4})")
-_CARD = re.compile(r"(?:карте|карты)[:\s]+(\d+\++\d+)", re.I)
+_CARD = re.compile(r"(?:карте|карты|карта)[:\s]+(\d+\++\d+)", re.I)
 _OP_DATE = re.compile(
     r"дата совершения\s*операции:\s*(\d{2}\.\d{2}\.\d{2,4})",
     re.I,
@@ -53,8 +53,6 @@ def parse_pdf_text(text: str, *, filename: str = "statement.pdf") -> list[Parsed
     ops = _split_ops(cleaned)
     out: list[ParsedTx] = []
     for op in ops:
-        if op["hold"]:
-            continue
         tx = _op_to_tx(op)
         if tx is None:
             continue
@@ -141,13 +139,15 @@ def _collect_until_amount(
 
 
 def _op_to_tx(op: dict[str, str | bool]) -> ParsedTx | None:
+    desc = re.sub(r"\s+", " ", str(op.get("desc") or "")).strip()
+    posted = parse_datetime(str(op.get("date") or ""))
+    if posted is None and op.get("hold"):
+        posted = _hold_posted(desc)
+    if posted is None:
+        return None
     amount = parse_amount(str(op.get("amount") or ""))
     if amount is None or abs(amount) < 0.0001:
         return None
-    posted = parse_datetime(str(op.get("date") or ""))
-    if posted is None:
-        return None
-    desc = re.sub(r"\s+", " ", str(op.get("desc") or "")).strip()
     code = str(op.get("code") or "")
     mcc = _pick_mcc(desc)
     card = _card_tail(desc)
@@ -155,6 +155,8 @@ def _op_to_tx(op: dict[str, str | bool]) -> ParsedTx | None:
     category = category_for_mcc(mcc)
     if not category:
         category = _category_from_text(desc, amount)
+    if op.get("hold") and not merchant:
+        merchant = _hold_merchant(desc)
     if not merchant:
         merchant = _short_desc(desc, code)
 
@@ -176,6 +178,9 @@ def _op_to_tx(op: dict[str, str | bool]) -> ParsedTx | None:
         needs, kind, internal = True, "transfer", False
         category = category or "Переводы"
 
+    extra = {"code": code, "raw": desc[:400]}
+    if op.get("hold"):
+        extra["hold"] = True
     return ParsedTx(
         posted_at=posted,
         amount=amount,
@@ -184,11 +189,11 @@ def _op_to_tx(op: dict[str, str | bool]) -> ParsedTx | None:
         description=merchant,
         mcc=mcc,
         card=card,
-        status="",
+        status="hold" if op.get("hold") else "",
         needs_review=needs,
         suggested_kind=kind,
         suggested_internal=internal,
-        extra={"code": code, "raw": desc[:400]},
+        extra=extra,
     )
 
 
@@ -223,6 +228,8 @@ def _merchant(desc: str) -> str:
             name = re.sub(r"\s+", " ", parts[-1])
             name = re.sub(r"MCC\d{4}", "", name, flags=re.I).strip(" .")
             name = re.sub(r"\b\d{4}\b", "", name).strip(" .")
+            if re.search(r"tsum|цум", name, re.I):
+                return "ЦУМ"
             return name[:80]
     return ""
 
@@ -237,10 +244,37 @@ def _short_desc(desc: str, code: str) -> str:
     return cut or code
 
 
+def _hold_posted(desc: str):
+    m = _OP_DATE.search(desc)
+    if m:
+        dt = parse_datetime(m.group(1))
+        if dt is not None:
+            return dt
+    m2 = re.search(r"\b(\d{2}\.\d{2}\.\d{2,4})\b", desc)
+    if m2:
+        return parse_datetime(m2.group(1))
+    return None
+
+
+def _hold_merchant(desc: str) -> str:
+    m = re.search(
+        r"неподтвержденн\w*\s+операци\w*:\s+\S+\s+(.+?)\s+\d{2}\.\d{2}\.\d{2,4}",
+        desc,
+        re.I,
+    )
+    name = (m.group(1).strip() if m else "")
+    blob = f"{name} {desc}".lower()
+    if "tsum" in blob or "цум" in blob:
+        return "ЦУМ"
+    return name[:80]
+
+
 def _category_from_text(desc: str, amount: float) -> str:
     blob = desc.lower()
     if "быстрых платежей" in blob or blob.startswith("перевод"):
         return "Переводы"
+    if "tsum" in blob or "цум" in blob:
+        return "Одежда"
     if "оплата по договору" in blob:
         return "Оплата по договору"
     if "лотере" in blob:

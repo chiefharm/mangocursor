@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from app.parse import parse_statement
@@ -124,6 +125,64 @@ def test_recategorize_moves_operation_between_articles(tmp_path: Path) -> None:
     names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
     assert names["Продукты"] == 1250.5
     assert "Супермаркеты" not in names
+
+
+POSTED_TSUM = """
+Выписка по счету
+Операции по счету
+Дата проводки Код операции Описание Сумма
+в валюте счета
+26.08.2026 CRD_9TW2TSUM Операция по карте: 220015++++++7603, на сумму: 28550.00 RUR, дата совершения
+операции: 25.08.26, место совершения операции: RU\\MOSCOW\\TSUM ONLINE MCC5651
+-28 550,00 RUR
+"""
+
+
+def test_hold_is_saved_as_expense_until_posted(tmp_path: Path) -> None:
+    from app.parse_pdf import parse_pdf_text
+    from tests.test_pdf import ALFA
+
+    store = _store(tmp_path)
+    store.import_transactions(parse_pdf_text(ALFA), "hold.pdf")
+    clothes = store.list_ledger(
+        "2026-08-01", "2026-08-31", bucket="expense", category="Одежда"
+    )
+    assert len(clothes) == 1
+    row = clothes[0]
+    assert row["amount"] == -28550
+    assert row["status"] == "hold"
+    assert row["description"] == "ЦУМ"
+    extra = row["extra"]
+    if isinstance(extra, str):
+        extra = json.loads(extra)
+    assert extra.get("hold") is True
+    summary = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Одежда"] == 28550
+
+    posted = store.import_transactions(parse_pdf_text(POSTED_TSUM), "posted.pdf")
+    assert posted.new_count == 1
+    after = store.list_ledger(
+        "2026-08-01", "2026-08-31", bucket="expense", category="Одежда"
+    )
+    assert len(after) == 1
+    assert after[0]["status"] != "hold"
+    assert after[0]["description"] == "ЦУМ"
+
+
+def test_hold_not_imported_if_posted_already_exists(tmp_path: Path) -> None:
+    from app.parse_pdf import parse_pdf_text
+    from tests.test_pdf import ALFA
+
+    store = _store(tmp_path)
+    store.import_transactions(parse_pdf_text(POSTED_TSUM), "posted.pdf")
+    again = store.import_transactions(parse_pdf_text(ALFA), "hold.pdf")
+    clothes = store.list_ledger(
+        "2026-08-01", "2026-08-31", bucket="expense", category="Одежда"
+    )
+    assert len(clothes) == 1
+    assert clothes[0]["status"] != "hold"
+    assert again.dup_count >= 1
 
 
 

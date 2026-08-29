@@ -36,7 +36,7 @@ HOLD Неподтвержденная операция: 1EE4HB TSUM ONLINE 25.08
 """
 
 
-def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
+def test_alfa_pdf_uses_posting_dates_and_keeps_holds() -> None:
     txs = parse_pdf_text(ALFA, filename="random-name.pdf")
     assert [t.posted_date.isoformat() for t in txs] == [
         "2026-08-01",
@@ -44,8 +44,8 @@ def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
         "2026-08-01",
         "2026-08-04",
         "2026-08-07",
+        "2026-08-25",
     ]
-    assert all(abs(t.amount) != 28550 for t in txs)
 
     piggy = next(t for t in txs if t.amount == -150)
     assert piggy.suggested_internal is True
@@ -67,3 +67,13 @@ def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
     assert ip.suggested_kind == "income"
     assert ip.category == "ИП"
     assert ip.needs_review is False
+
+    tsum = next(t for t in txs if abs(t.amount) == 28550)
+    assert tsum.amount == -28550
+    assert tsum.posted_date.isoformat() == "2026-08-25"
+    assert tsum.category == "Одежда"
+    assert tsum.description == "ЦУМ"
+    assert tsum.status == "hold"
+    assert tsum.extra.get("hold") is True
+    assert tsum.needs_review is False
+    assert tsum.suggested_kind == "expense"
