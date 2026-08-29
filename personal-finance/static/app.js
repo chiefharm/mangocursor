@@ -8,6 +8,7 @@ const state = {
   month: new Date().getMonth() + 1,
   summary: null,
   review: null,
+  reviewId: null,
   view: "home",
   notice: "",
 };
@@ -54,6 +55,11 @@ function render() {
   if (state.view === "review") {
     app.innerHTML = reviewView();
     bindReview();
+    return;
+  }
+  if (state.view === "queue") {
+    app.innerHTML = queueView();
+    bindQueue();
     return;
   }
   app.innerHTML = homeView();
@@ -156,33 +162,30 @@ function homeView() {
         </div>
         ${renderBars(s?.income_by_category, maxInc, "in", s?.income) || `<p class="empty">Пока пусто</p>`}
       </section>
+      ${unlabeledCard(s)}
+      ${tabBar()}
     </div>`;
 }
 
 function reviewView() {
   const items = state.review?.transactions || [];
-  const current = items[0];
+  const current = items.find((t) => String(t.id) === String(state.reviewId)) || items[0];
   const left = items.length;
   if (!current) {
     return `
       <div class="app-shell">
-        <div class="topbar"><div class="brand">Касса</div><button class="ghost" id="back-home">К сводке</button></div>
-        <div class="card"><h2>Все переводы разобраны</h2><p>Статьи банка и ваши пояснения уже в сводке.</p></div>
+        <div class="topbar"><div class="brand">Касса</div></div>
+        <div class="card"><h2>Все переводы разобраны</h2><p>Статьи банка и ваши пояснения уже в сводке. Неразмеченные — в разделе «Переводы без разметки».</p></div>
+        ${tabBar()}
       </div>`;
   }
   const amtClass = current.amount < 0 ? "neg" : "pos";
-  const total = Math.max(left, state.me.review_count || left);
-  const done = Math.max(0, total - left);
-  const dots = Array.from({ length: Math.min(total, 8) }, (_, i) =>
-    `<span class="${i < done ? "on" : ""}"></span>`
-  ).join("");
   return `
     <div class="app-shell">
       <div class="topbar">
         <div class="brand">Осталось ${left}</div>
-        <button class="ghost" id="back-home">К сводке</button>
+        <button class="ghost" id="review-later">Разобрать позже</button>
       </div>
-      <div class="progress-dots">${dots}</div>
       <section class="hero">
         <div class="label">${fmtDate(current.posted_date)}</div>
         <p class="net serif ${amtClass}">${money(current.amount, true)}</p>
@@ -202,9 +205,75 @@ function reviewView() {
           <input class="text-input" id="custom-cat" placeholder="Своя статья" />
         </div>
         <button class="primary" id="save-review" style="width:100%;margin-top:14px">Сохранить</button>
+        <button class="ghost" id="leave-unlabeled" style="width:100%;margin-top:8px">Оставить неразмеченным</button>
         <div class="error" id="review-error" hidden></div>
       </section>
+      ${tabBar()}
     </div>`;
+}
+
+function queueView() {
+  const pending = state.review?.transactions || [];
+  const s = state.summary?.summary;
+  return `
+    <div class="app-shell">
+      <div class="topbar">
+        <div class="brand">Касса</div>
+      </div>
+      <h1 class="queue-title serif">Неразобранные</h1>
+      <p class="hint">${pending.length
+        ? "Можно разобрать сейчас или оставить без статьи — они попадут в «Переводы без разметки»."
+        : "Очереди нет. Неразмеченные за месяц — ниже, если они есть."}</p>
+      ${pending.length ? `
+        <button class="ghost" id="unlabel-all" style="width:100%;margin:8px 0 12px">Оставить все неразмеченными</button>
+        <section class="card">
+          ${pending.map((t) => txRow(t, "open-review")).join("")}
+        </section>` : `<p class="empty">Неразобранных переводов нет</p>`}
+      ${unlabeledCard(s)}
+      ${tabBar()}
+    </div>`;
+}
+
+function tabBar() {
+  const n = Number(state.review?.count ?? state.summary?.summary?.unreviewed_count ?? 0);
+  const onQueue = state.view === "queue" || state.view === "review";
+  return `
+    <nav class="tabbar">
+      <button type="button" class="tab ${state.view === "home" ? "on" : ""}" id="tab-home">Сводка</button>
+      <button type="button" class="tab ${onQueue ? "on" : ""} ${n ? "hot" : ""}" id="tab-queue">
+        Неразобранные
+        ${n ? `<span class="tab-badge">${n > 99 ? "99+" : n}</span>` : ""}
+      </button>
+    </nav>`;
+}
+
+function unlabeledCard(s) {
+  const rows = s?.unlabeled || [];
+  if (!rows.length) return "";
+  return `
+    <section class="card unlabeled-card">
+      <div class="card-head">
+        <h2>Переводы без разметки</h2>
+        <span class="muted">${money(Math.abs(s.unlabeled_sum || 0))}</span>
+      </div>
+      <p class="hint">Оставили без статьи. В сальдо входят, в обычные категории — нет.</p>
+      ${rows.map((t) => txRow(t)).join("")}
+    </section>`;
+}
+
+function txRow(t, action) {
+  const cls = t.amount < 0 ? "neg" : "pos";
+  const open = action ? ` data-open="${t.id}"` : "";
+  const tag = action ? "button" : "div";
+  const type = action ? ` type="button"` : "";
+  return `
+    <${tag} class="tx-row"${type}${open}>
+      <div>
+        <div class="tx-desc">${esc(t.description || "Перевод")}</div>
+        <div class="tx-sub">${esc(fmtDate(t.posted_date))}</div>
+      </div>
+      <div class="tx-amt ${cls}">${money(t.amount, true)}</div>
+    </${tag}>`;
 }
 
 function renderGoalMeter(s) {
@@ -308,7 +377,8 @@ function bindLogin() {
 function bindHome() {
   $("#prev-month")?.addEventListener("click", () => shiftMonth(-1));
   $("#next-month")?.addEventListener("click", () => shiftMonth(1));
-  $("#go-review")?.addEventListener("click", () => { state.view = "review"; loadReview(); });
+  $("#go-review")?.addEventListener("click", () => { state.view = "review"; state.reviewId = null; loadReview(); });
+  bindTabs();
   $("#logout-btn")?.addEventListener("click", async () => { await api("/api/logout", { method: "POST" }); state.me.authed = false; render(); });
   $("#notify-btn")?.addEventListener("click", async () => {
     try {
@@ -343,11 +413,58 @@ function bindHome() {
   $("#pull-drive")?.addEventListener("click", pullDrive);
 }
 
+function bindTabs() {
+  $("#tab-home")?.addEventListener("click", () => {
+    state.view = "home";
+    state.reviewId = null;
+    loadSummary();
+  });
+  $("#tab-queue")?.addEventListener("click", () => showQueue());
+}
+
+async function showQueue() {
+  state.view = "queue";
+  state.reviewId = null;
+  state.review = await api("/api/review");
+  await loadSummary();
+}
+
+function bindQueue() {
+  bindTabs();
+  document.querySelectorAll("[data-open]").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.reviewId = el.getAttribute("data-open");
+      state.view = "review";
+      if (state.review?.count) render();
+      else loadReview();
+    });
+  });
+  $("#unlabel-all")?.addEventListener("click", async () => {
+    if (!confirm("Все неразобранные уйдут в «Переводы без разметки»?")) return;
+    try {
+      const res = await api("/api/review/unlabeled", { method: "POST", body: {} });
+      state.notice = res.count
+        ? `${res.count} ${plural(res.count, "перевод", "перевода", "переводов")} без разметки`
+        : "Очередь уже пуста";
+      if (res.telegram_sent) state.notice += " · отчёт в Telegram";
+      await showQueue();
+    } catch (err) {
+      alert(err.data?.detail || err.message || "Не сохранилось");
+    }
+  });
+}
+
 function bindReview() {
-  $("#back-home")?.addEventListener("click", () => { state.view = "home"; loadSummary(); });
+  bindTabs();
+  $("#review-later")?.addEventListener("click", () => {
+    state.view = "home";
+    state.reviewId = null;
+    loadSummary();
+  });
   const card = $("#review-card");
   if (!card) return;
-  const current = (state.review?.transactions || [])[0];
+  const items = state.review?.transactions || [];
+  const current = items.find((t) => String(t.id) === String(card.dataset.id)) || items[0];
   let mode = current?.kind === "income" ? "income"
     : current?.kind === "transfer" || current?.is_internal ? "transfer"
     : "expense";
@@ -357,7 +474,8 @@ function bindReview() {
   let chosen = "";
 
   const paintChips = () => {
-    const list = mode === "income" ? cats.income : cats.expense;
+    const list = (mode === "income" ? cats.income : cats.expense)
+      .filter((name) => name !== "Переводы без разметки");
     chips.innerHTML = list.map((name) =>
       `<button type="button" class="chip ${chosen === name ? "on" : ""}" data-cat="${esc(name)}">${esc(name)}</button>`
     ).join("");
@@ -402,6 +520,21 @@ function bindReview() {
         },
       });
       if (res.telegram_sent) state.notice = "Все переводы разнесены · отчёт в Telegram";
+      await loadReview();
+    } catch (err) {
+      const box = $("#review-error");
+      box.hidden = false;
+      box.textContent = err.message || "Не сохранилось";
+    }
+  });
+  $("#leave-unlabeled")?.addEventListener("click", async () => {
+    try {
+      const res = await api("/api/review/unlabeled", {
+        method: "POST",
+        body: { id: Number(card.dataset.id) },
+      });
+      state.reviewId = null;
+      if (res.telegram_sent) state.notice = "Очередь пуста · отчёт в Telegram";
       await loadReview();
     } catch (err) {
       const box = $("#review-error");
@@ -476,15 +609,26 @@ async function upload(file) {
 }
 
 async function loadSummary() {
-  state.summary = await api(`/api/summary?year=${state.year}&month=${state.month}`);
+  const [summary, review] = await Promise.all([
+    api(`/api/summary?year=${state.year}&month=${state.month}`),
+    api("/api/review"),
+  ]);
+  state.summary = summary;
+  state.review = review;
   render();
 }
 
 async function loadReview() {
   state.review = await api("/api/review");
-  if (!state.review.count) state.view = "home";
-  if (state.view === "home") await loadSummary();
-  else render();
+  if (!state.review.count) {
+    state.view = "queue";
+    await loadSummary();
+    return;
+  }
+  if (state.reviewId && !state.review.transactions.some((t) => String(t.id) === String(state.reviewId))) {
+    state.reviewId = null;
+  }
+  render();
 }
 
 async function shiftMonth(delta) {

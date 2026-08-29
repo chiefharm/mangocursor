@@ -19,7 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from .parse import ParseError, parse_statement
 from .report import month_title
-from .store import FinanceStore, public_tx
+from .store import FinanceStore, public_tx, UNLABELED_CATEGORY
 from .advice import build_digest
 from .notify import send_after_import, send_after_review_cleared
 from . import telegram as tg
@@ -396,6 +396,47 @@ async def review_one(tx_id: int, request: Request) -> dict:
         "transaction": public_tx(row),
         "review_count": remaining,
         "telegram_sent": telegram_sent,
+    }
+
+
+@app.post("/api/review/unlabeled")
+async def leave_unlabeled(request: Request) -> dict:
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    raw_id = body.get("id") if isinstance(body, dict) else None
+    tx_id = int(raw_id) if raw_id not in (None, "") else None
+    try:
+        rows = store.leave_unlabeled(tx_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Операция не найдена") from exc
+    remaining = store.review_count()
+    telegram_sent = False
+    if remaining == 0 and rows:
+        posted = str(rows[-1].get("posted_date") or date.today().isoformat())
+        d = date.fromisoformat(posted[:10])
+        date_from, date_to = _period(d.year, d.month)
+        summary = store.summary(date_from, date_to)
+        prev_from, prev_to = store.previous_period(date_from, date_to)
+        previous = store.summary(prev_from, prev_to)
+        try:
+            telegram_sent = bool(
+                send_after_review_cleared(
+                    store,
+                    summary=summary,
+                    previous=previous if previous["tx_count"] else None,
+                )
+            )
+        except Exception:
+            telegram_sent = False
+    return {
+        "ok": True,
+        "count": len(rows),
+        "review_count": remaining,
+        "telegram_sent": telegram_sent,
+        "category": UNLABELED_CATEGORY,
     }
 
 
