@@ -69,13 +69,11 @@ if [[ ! -f "$DEST/.env" ]]; then
   echo "==> .env"
   PASS="$(python3 -c 'import secrets,string; a=string.ascii_letters+string.digits; print("".join(secrets.choice(a) for _ in range(16)))')"
   TOKEN=""
-  CHAT=""
   if [[ -f "$REPO/.env" ]]; then
     TOKEN="$(grep -E '^TELEGRAM_BOT_TOKEN=' "$REPO/.env" | head -1 | cut -d= -f2- | tr -d "\"'")"
-    CHAT="$(grep -E '^TELEGRAM_CHAT_ID=' "$REPO/.env" | head -1 | cut -d= -f2- | tr -d "\"'")"
   fi
   TG_ON=0
-  if [[ -n "$TOKEN" && -n "$CHAT" ]]; then
+  if [[ -n "$TOKEN" ]]; then
     TG_ON=1
   fi
   cat > "$DEST/.env" <<EOF
@@ -83,7 +81,6 @@ FINANCE_PASSWORD=$PASS
 FINANCE_PORT=$PORT
 FINANCE_TELEGRAM_ENABLED=$TG_ON
 FINANCE_TELEGRAM_BOT_TOKEN=$TOKEN
-FINANCE_TELEGRAM_CHAT_ID=$CHAT
 EOF
   chmod 600 "$DEST/.env"
   umask 077
@@ -98,15 +95,9 @@ sed -i 's/\r$//' "$DEST/deploy/personal-finance.service" "$DEST/deploy/personal-
 cp "$DEST/deploy/personal-finance.service" /etc/systemd/system/personal-finance.service
 cp "$DEST/deploy/personal-finance-bot.service" /etc/systemd/system/personal-finance-bot.service
 systemctl daemon-reload
-systemctl enable --now personal-finance
+systemctl enable personal-finance
 systemctl restart personal-finance
-if grep -qE '^FINANCE_TELEGRAM_ENABLED=1' "$DEST/.env"; then
-  systemctl enable --now personal-finance-bot
-  systemctl restart personal-finance-bot || true
-fi
 sleep 2
-systemctl --no-pager --full status personal-finance | head -n 16 || true
-systemctl --no-pager --full status personal-finance-bot | head -n 12 || true
 
 if command -v ufw >/dev/null 2>&1; then
   ufw allow "${PORT}/tcp" || true
@@ -116,10 +107,44 @@ PUB="$(curl -4 -fsS --max-time 8 https://ifconfig.me 2>/dev/null || true)"
 if [[ -z "$PUB" ]]; then
   PUB="$(hostname -I 2>/dev/null | awk '{print $1}')"
 fi
+if [[ -n "$PUB" ]]; then
+  cd "$DEST"
+  "$DEST/.venv/bin/python" - <<PY || true
+from app.chats import upsert_env
+from pathlib import Path
+upsert_env(Path("$DEST") / ".env", "FINANCE_SITE_URL", "http://${PUB}:${PORT}")
+PY
+fi
+
+echo "==> bind Telegram group «учет финансов»"
+BIND_OK=0
+if [[ -n "$(grep -E '^FINANCE_TELEGRAM_BOT_TOKEN=.' "$DEST/.env" | cut -d= -f2-)" ]]; then
+  cd "$DEST"
+  if "$DEST/.venv/bin/python" -m app.chats --bind "учет финансов" --notify; then
+    BIND_OK=1
+  else
+    echo "[WARN] Группу пока не вижу. Напишите в «учет финансов» любое сообщение и на сервере:"
+    echo "  $DEST/.venv/bin/python -m app.chats --bind \"учет финансов\" --notify"
+    echo "  systemctl restart personal-finance personal-finance-bot"
+  fi
+fi
+
+systemctl restart personal-finance
+if grep -qE '^FINANCE_TELEGRAM_CHAT_ID=-' "$DEST/.env"; then
+  systemctl enable --now personal-finance-bot
+  systemctl restart personal-finance-bot || true
+fi
+sleep 1
+systemctl --no-pager --full status personal-finance | head -n 16 || true
+systemctl --no-pager --full status personal-finance-bot | head -n 12 || true
 
 echo
 echo "[DONE] Касса: http://${PUB}:$PORT"
-echo "В .env укажите FINANCE_TELEGRAM_CHAT_ID группы кассы (отрицательный id), не группы SOCO."
+if [[ "$BIND_OK" -eq 1 ]]; then
+  echo "Telegram: группа «учет финансов» привязана, в чат ушло тестовое сообщение."
+else
+  echo "Сайт готов. Группу Telegram привяжете командой app.chats (см. выше) — не чаты SOCO."
+fi
 if [[ -n "$PASS" ]]; then
   echo "Пароль входа (сохраните, в git его нет): $PASS"
 elif [[ -f "$DEST/data/.initial-password" ]]; then

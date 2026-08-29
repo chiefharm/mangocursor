@@ -59,6 +59,10 @@ def api(method: str, payload: dict[str, Any] | None = None, *, timeout: int = 35
     return parsed
 
 
+def get_me() -> dict[str, Any]:
+    return api("getMe", {})
+
+
 def send_message(
     text: str,
     *,
@@ -88,7 +92,10 @@ def answer_callback(callback_id: str, text: str, *, alert: bool = False) -> None
 
 
 def get_updates(offset: int | None, timeout: int = 25) -> list[dict[str, Any]]:
-    payload: dict[str, Any] = {"timeout": timeout, "allowed_updates": ["message", "callback_query"]}
+    payload: dict[str, Any] = {
+        "timeout": timeout,
+        "allowed_updates": ["message", "callback_query", "my_chat_member", "chat_member"],
+    }
     if offset is not None:
         payload["offset"] = offset
     result = api("getUpdates", payload, timeout=timeout + 10)
