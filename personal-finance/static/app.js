@@ -220,15 +220,15 @@ function queueView() {
       <div class="topbar">
         <div class="brand">Касса</div>
       </div>
-      <h1 class="queue-title serif">Неразобранные</h1>
+      <h1 class="queue-title serif">Разобрать позже</h1>
       <p class="hint">${pending.length
-        ? "Можно разобрать сейчас или оставить без статьи — они попадут в «Переводы без разметки»."
+        ? "Все неразобранные переводы здесь. Откройте любой или оставьте без статьи."
         : "Очереди нет. Неразмеченные за месяц — ниже, если они есть."}</p>
       ${pending.length ? `
         <button class="ghost" id="unlabel-all" style="width:100%;margin:8px 0 12px">Оставить все неразмеченными</button>
         <section class="card">
           ${pending.map((t) => txRow(t, "open-review")).join("")}
-        </section>` : `<p class="empty">Неразобранных переводов нет</p>`}
+        </section>` : `<p class="empty">Пока нечего разбирать позже</p>`}
       ${unlabeledCard(s)}
       ${tabBar()}
     </div>`;
@@ -241,7 +241,7 @@ function tabBar() {
     <nav class="tabbar">
       <button type="button" class="tab ${state.view === "home" ? "on" : ""}" id="tab-home">Сводка</button>
       <button type="button" class="tab ${onQueue ? "on" : ""} ${n ? "hot" : ""}" id="tab-queue">
-        Неразобранные
+        Разобрать позже
         ${n ? `<span class="tab-badge">${n > 99 ? "99+" : n}</span>` : ""}
       </button>
     </nav>`;
@@ -377,7 +377,7 @@ function bindLogin() {
 function bindHome() {
   $("#prev-month")?.addEventListener("click", () => shiftMonth(-1));
   $("#next-month")?.addEventListener("click", () => shiftMonth(1));
-  $("#go-review")?.addEventListener("click", () => { state.view = "review"; state.reviewId = null; loadReview(); });
+  $("#go-review")?.addEventListener("click", () => showQueue());
   bindTabs();
   $("#logout-btn")?.addEventListener("click", async () => { await api("/api/logout", { method: "POST" }); state.me.authed = false; render(); });
   $("#notify-btn")?.addEventListener("click", async () => {
@@ -457,9 +457,8 @@ function bindQueue() {
 function bindReview() {
   bindTabs();
   $("#review-later")?.addEventListener("click", () => {
-    state.view = "home";
     state.reviewId = null;
-    loadSummary();
+    showQueue();
   });
   const card = $("#review-card");
   if (!card) return;
