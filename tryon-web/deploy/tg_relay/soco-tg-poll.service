@@ -1,0 +1,18 @@
+[Unit]
+Description=SOCO Telegram long-poll forwarder (AMS → NSK)
+After=network.target soco-tg-relay.service
+Requires=soco-tg-relay.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/soco-tg-relay
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/soco-tg-relay/.env
+EnvironmentFile=-/opt/mango-pipeline/.env
+ExecStart=/opt/soco-tg-relay/.venv/bin/python /opt/soco-tg-relay/tg_poll_forward.py
+Restart=always
+RestartSec=3
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

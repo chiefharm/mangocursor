@@ -1,0 +1,16 @@
+[Unit]
+Description=SOCO Telegram Bot API relay (Amsterdam)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/soco-tg-relay
+EnvironmentFile=-/opt/soco-tg-relay/.env
+EnvironmentFile=-/opt/mango-pipeline/.env
+ExecStart=/opt/soco-tg-relay/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 18100 --workers 1
+Restart=always
+RestartSec=3
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

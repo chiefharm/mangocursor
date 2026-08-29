@@ -19,7 +19,8 @@ $files = @(
     "call_qc.py", "daily_pipeline.py", "mango_sync.py", "mango_vpbx.py",
     "send_day_to_telegram.py", "transcript_utils.py", "yandex_stt.py",
     "site_config.py", "telegram_notify.py", "telegram_format.py",
-    "get_telegram_chat_ids.py", "revenue_report.py", "requirements.txt",
+    "get_telegram_chat_ids.py", "revenue_report.py", "tryon_usage_report.py",
+    "requirements.txt",
     "PROJECT_MEMORY.md", "SESSION_LOG.md", "CODE_MAP.md", "AGENTS.md"
 ) | ForEach-Object { Join-Path $Root $_ } | Where-Object { Test-Path $_ }
 
@@ -27,6 +28,7 @@ ssh -i $SshKey $Host_ "mkdir -p $Remote/deploy $Remote/logs"
 scp -i $SshKey @files "${Host_}:${Remote}/"
 $deployFiles = @(
     (Join-Path $Root "deploy\install_revenue_cron.sh"),
+    (Join-Path $Root "deploy\install_tryon_usage_cron.sh"),
     (Join-Path $Root "deploy\vps_install.sh")
 ) | Where-Object { Test-Path $_ }
 if ($deployFiles.Count -gt 0) {

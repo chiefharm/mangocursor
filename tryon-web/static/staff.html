@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>SOCO · Кабинет сотрудников</title>
+  <link rel="icon" href="/static/logo-soco.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans+Condensed:wght@300;700&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css?v=37" />
+</head>
+<body>
+  <div class="bg"></div>
+  <main class="wrap">
+    <header class="hero">
+      <a class="logo-link" href="https://soco-moscow.ru/" target="_blank" rel="noopener">
+        <img
+          class="logo"
+          src="/static/logo-soco.png?v=7"
+          srcset="/static/logo-soco.png?v=7 1x, /static/logo-soco-2x.png?v=7 2x"
+          alt="SOCO"
+          width="168"
+          height="77"
+        />
+      </a>
+      <h1>Кабинет сотрудников SOCO</h1>
+      <p class="lead">Генерация сразу на экране, без бота и без лимитов. Результаты хранятся 30 дней.</p>
+    </header>
+
+    <section class="panel" id="staff-login-panel">
+      <div class="panel-head">
+        <span class="step">•</span>
+        <div>
+          <h2>Вход</h2>
+          <p>Телефон и пароль сотрудника.</p>
+        </div>
+      </div>
+      <form id="staff-login-form" class="lead-form">
+        <label class="field">
+          <span>Телефон сотрудника</span>
+          <input id="staff-phone" type="tel" required placeholder="+7..." autocomplete="tel" />
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input id="staff-password" type="password" required autocomplete="current-password" />
+        </label>
+        <button class="btn primary wide" type="submit">Войти</button>
+        <p id="staff-login-error" class="error hidden"></p>
+      </form>
+    </section>
+
+    <div id="staff-workspace" class="hidden">
+      <section class="panel">
+        <div class="actions" style="justify-content: space-between; align-items: center;">
+          <p id="staff-user-label" class="hint" style="margin: 0;"></p>
+          <button class="btn ghost" id="staff-logout" type="button">Выйти</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <span class="step">0</span>
+          <div>
+            <h2>Клиент</h2>
+            <p>Имя для поиска в базе генераций.</p>
+          </div>
+        </div>
+        <label class="field">
+          <span>Имя клиента</span>
+          <input id="client-name" type="text" required placeholder="Как зовут клиента" autocomplete="off" />
+        </label>
+      </section>
+
+      <section class="panel" id="step-before">
+        <div class="panel-head">
+          <span class="step">1</span>
+          <div>
+            <h2>Фото «до»</h2>
+            <p>Селфи, взгляд в камеру, хорошее освещение.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <label class="btn primary">
+            Загрузить фото
+            <input id="before-file" type="file" accept="image/*" hidden />
+          </label>
+          <label class="btn ghost">
+            Сфотографировать
+            <input id="before-camera" type="file" accept="image/*" capture="user" hidden />
+          </label>
+          <button type="button" class="btn ghost danger hidden" id="btn-clear-before">Убрать</button>
+        </div>
+        <p class="hint">Кнопка «Сфотографировать» отразит селфи как в зеркале. Готовое фото из галереи не переворачиваем.</p>
+        <div class="preview-box hidden" id="before-preview-wrap">
+          <img id="before-preview" alt="Фото до" />
+        </div>
+      </section>
+
+      <section class="panel" id="step-refs">
+        <div class="panel-head">
+          <span class="step">2</span>
+          <div>
+            <h2>Референсы (до 2)</h2>
+            <p>Загрузите пример причёски или выберите из портфолио.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <label class="btn primary">
+            Загрузить референс
+            <input id="ref-file" type="file" accept="image/*" multiple hidden />
+          </label>
+          <button type="button" class="btn ghost" id="btn-portfolio">Выбрать из портфолио</button>
+        </div>
+        <div class="refs-grid" id="refs-grid"></div>
+        <p class="hint" id="refs-hint">Можно выбрать до 2 референсов.</p>
+      </section>
+
+      <section class="panel cta-panel">
+        <button type="button" class="btn primary wide" id="btn-run" disabled>Сгенерировать</button>
+        <p class="hint center">Без бота и без лимита. Результат сразу на экране.</p>
+        <div class="progress hidden" id="progress">
+          <div class="bar"><span id="progress-fill"></span></div>
+          <p id="progress-text">Делается магия…</p>
+          <p class="progress-pct" id="progress-pct">0%</p>
+        </div>
+        <p class="error hidden" id="staff-tryon-error"></p>
+      </section>
+
+      <section class="panel hidden" id="step-after">
+        <div class="panel-head">
+          <span class="step">3</span>
+          <div>
+            <h2>Результат</h2>
+            <p id="after-lead">Готово — сохранено в базу на 30 дней.</p>
+          </div>
+        </div>
+        <div class="compare" id="staff-last-result"></div>
+      </section>
+
+      <section class="panel" id="staff-jobs-panel">
+        <div class="panel-head">
+          <span class="step">•</span>
+          <div>
+            <h2>База генераций (30 дней)</h2>
+            <p>Поиск по имени, дате и статусу.</p>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="staff-refresh" type="button">Обновить</button>
+        </div>
+        <label class="field">
+          <span>Поиск</span>
+          <input id="staff-search" type="text" placeholder="Имя / client_id / job_id" />
+        </label>
+        <div class="actions">
+          <label class="field">
+            <span>Статус</span>
+            <select id="staff-status">
+              <option value="">Все</option>
+              <option value="done">done</option>
+              <option value="processing">processing</option>
+              <option value="error">error</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Дата от</span>
+            <input id="staff-date-from" type="date" />
+          </label>
+          <label class="field">
+            <span>Дата до</span>
+            <input id="staff-date-to" type="date" />
+          </label>
+        </div>
+        <div id="staff-jobs-list"></div>
+      </section>
+    </div>
+
+    <footer class="foot">
+      <p>SOCO.salon · кабинет сотрудников</p>
+    </footer>
+  </main>
+
+  <div class="modal hidden" id="portfolio-modal" role="dialog" aria-modal="true">
+    <div class="modal-card modal-card-portfolio">
+      <div class="modal-head">
+        <h2>Портфолио SOCO</h2>
+        <button type="button" class="btn ghost" id="btn-close-portfolio">Закрыть</button>
+      </div>
+      <div class="portfolio-tabs" id="portfolio-tabs"></div>
+      <div class="portfolio-scroll">
+        <div class="portfolio-grid" id="portfolio-grid"></div>
+      </div>
+      <div class="portfolio-footer">
+        <button type="button" class="btn primary wide" id="btn-apply-portfolio">Добавить выбранные · 0 из 2</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/staff.js?v=2"></script>
+</body>
+</html>

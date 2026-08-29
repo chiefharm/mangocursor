@@ -17,10 +17,12 @@
 | `transcript_utils.py` | `refine_segments()` без ролей, `normalize_spoken_numbers()`, `transcript_paragraphs()` |
 | `call_qc.py` | `assess_call()`, `format_day_summary(site_label=…)` |
 | `telegram_format.py` | `build_call_message(..., site_label, branch)` |
-| `telegram_notify.py` | `site_chat_ids(site)` — личка + группа site |
-| `send_day_to_telegram.py` | `--site moscow\|krasnoyarsk --date YYYY-MM-DD` |
-| `daily_pipeline.py` | Multi-site loop, timer 10:00 MSK |
-| `revenue_report.py` | Выручка: YaDisk Excel → прогноз → Telegram (личка), 05:00 MSK |
+| `telegram_notify.py` | `site_chat_ids(site)` — личка + группа site (legacy; звонки больше не через TG) |
+| `max_notify.py` | Отправка звонков в MAX: личка + группа site |
+| `send_day_to_telegram.py` | `--site moscow\|krasnoyarsk --date YYYY-MM-DD` → **MAX** |
+| `daily_pipeline.py` | Multi-site loop, timer 10:00 MSK, отправка в **MAX** |
+| `revenue_report.py` | Выручка: YaDisk Excel → прогноз → Telegram (личка); cron на **EU** `72.56.27.174`, 05:00 MSK |
+| `tryon_usage_report.py` | Токены примерки clients vs staff → Telegram личка, 05:05 MSK |
 
 ## Деплой / утилиты
 
@@ -35,6 +37,7 @@
 | `deploy/count_tracked.sh` | звонки по филиалам |
 | `deploy/vps.host` | IP VPS |
 | `deploy/install_revenue_cron.sh` | cron отчётов выручки 05:00 MSK |
+| `deploy/install_tryon_usage_cron.sh` | cron токенов примерки 05:05 MSK |
 
 ## Память AI
 
@@ -77,18 +80,23 @@ build_call_message(..., site_label, branch)
 
 ## systemd
 
-- `mango-pipeline.timer` — 07:00 UTC = 10:00 MSK
-- `mango-pipeline.service` — `daily_pipeline.py --mango-sync --mango-days 1`
+- `mango-pipeline.timer` — 07:00 UTC = 10:00 MSK (Москва)
+- `mango-pipeline.service` — `daily_pipeline.py --mango-sync --mango-days 1 --site moscow`
+- `mango-pipeline-kras.timer` — **выключен 27.08.2026** (06:00 MSK); включить: `systemctl enable --now mango-pipeline-kras.timer`
 
 ## SOCO Salon — AI-примерка (отдельная задача)
 
 | Файл | Назначение |
 |------|------------|
 | `docs/soco-salon-ai-tryon-session.md` | Переписка: Perfect Corp vs AILab/GPT, архитектура |
+| `docs/perfectcorp-hair-tryon-cheatsheet.md` | Краткая справка YouCam hair-transfer: endpoints, units, лимиты фото |
 | `tools/hair_tryon_test/run_comparison.py` | Тест API примерки |
-| `tryon-web/` | **Веб-сервис YouCam**: «до» + до 3 референсов → «после» |
+| `tryon-web/` | **Веб YouCam**: согласие ПДн → «до» + до 2 реф (upload/портфолио) → «после» на сайте; Метрика ClientID (64069270) |
+| `tryon-web/static/staff.html` + `tryon-web/static/staff.js` | Кабинет сотрудников: вход по телефону/паролю, генерация без бота, просмотр базы генераций |
+| `tryon-web/app/staff_auth.py` | SQLite auth staff users, cookie-сессия, bootstrap из `.env` |
+| `tryon-web/deploy/build_portfolio.py` | Скачать портфолио SOCO в `static/portfolio/` |
 | `docs/SECURITY_AUDIT_2026-07-28.md` | Аудит утечек на GitHub |
 
 ---
 
-*Обновлено: 2026-07-31*
+*Обновлено: 2026-08-01*

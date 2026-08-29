@@ -149,13 +149,15 @@ class PerfectCorpClient:
                         payload=body,
                     )
                 data = body.get("data") or body
-                status = data.get("task_status") or data.get("status")
-                if status == "success":
-                    url = _extract_result_url(data)
+                status = str(data.get("task_status") or data.get("status") or "").lower()
+                url = _extract_result_url(data) or _extract_result_url(body)
+                if status in {"success", "succeeded", "ok", "done"} or (
+                    url and status not in {"error", "failed"}
+                ):
                     if not url:
                         raise PerfectCorpError(f"Success without URL: {body}")
                     return url
-                if status == "error":
+                if status in {"error", "failed"}:
                     msg = data.get("error_message") or data.get("error") or "task failed"
                     raise PerfectCorpError(str(msg), payload=body)
                 await asyncio.sleep(3)
@@ -171,16 +173,46 @@ def _safe_json(resp: httpx.Response) -> dict:
 
 
 def _extract_result_url(data: dict) -> str | None:
-    for key in ("result_url", "download_url", "url"):
-        if data.get(key):
-            return data[key]
-    results = data.get("results") or data.get("images") or []
+    for key in (
+        "result_url",
+        "download_url",
+        "url",
+        "image_url",
+        "file_url",
+        "output_url",
+        "result",
+    ):
+        val = data.get(key)
+        if isinstance(val, str) and val.startswith("http"):
+            return val
+    results = data.get("results") or data.get("images") or data.get("output") or []
+    if isinstance(results, dict):
+        return _extract_result_url(results)
     if isinstance(results, list) and results:
         item = results[0]
-        if isinstance(item, str):
+        if isinstance(item, str) and item.startswith("http"):
             return item
         if isinstance(item, dict):
-            for key in ("url", "result_url", "download_url"):
-                if item.get(key):
-                    return item[key]
+            found = _extract_result_url(item)
+            if found:
+                return found
+    # last resort: scan nested values for an https image URL
+    return _find_http_url(data)
+
+
+def _find_http_url(obj: Any) -> str | None:
+    if isinstance(obj, str) and obj.startswith("http") and any(
+        ext in obj.lower() for ext in (".jpg", ".jpeg", ".png", ".webp", "amazonaws.com", "makeupar")
+    ):
+        return obj
+    if isinstance(obj, dict):
+        for val in obj.values():
+            found = _find_http_url(val)
+            if found:
+                return found
+    if isinstance(obj, list):
+        for val in obj:
+            found = _find_http_url(val)
+            if found:
+                return found
     return None

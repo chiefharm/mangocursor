@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send QC-filtered calls for one day to Telegram: summary + bad/uncertain only."""
+"""Send QC-filtered calls for one day to MAX: summary + bad/uncertain only."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from mango_sync import load_index
 from mango_vpbx import MangoVpbxClient
 from site_config import get_site, load_sites
 from telegram_format import build_call_message, format_date_no_year, format_time_short
-from telegram_notify import site_chat_ids, tg_broadcast_document, tg_broadcast_message
+from max_notify import _max_targets_for_site, max_broadcast_document, max_broadcast_message
 from site_lines import branch_label, is_tracked_call
 from transcript_utils import parse_transcript_file, transcript_paragraphs
 
@@ -77,11 +77,11 @@ def main() -> None:
 
     base = Path(args.base_dir).resolve()
     load_dotenv(base / args.dotenv)
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    token = os.getenv("MAX_BOT_TOKEN", "").strip()
     site = get_site(args.site)
-    chat_ids = site_chat_ids(site)
-    if not token or not chat_ids:
-        raise SystemExit("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
+    targets = _max_targets_for_site(site)
+    if not token or not targets:
+        raise SystemExit("Set MAX_BOT_TOKEN and MAX_OWNER_USER_ID / MAX_*_CHAT_ID")
 
     target = datetime.strptime(args.date, "%Y-%m-%d").date()
     prefix = target.strftime("%Y-%m-%d")
@@ -154,12 +154,12 @@ def main() -> None:
         site_label=site.label,
         stats_unavailable=stats_unavailable,
     )
-    tg_broadcast_message(
-        token, chat_ids, summary, parse_mode="HTML" if stats_unavailable else None
-    )
+    max_broadcast_message(token, targets, summary)
 
     if not to_send:
-        tg_broadcast_message(token, chat_ids, f"{site.label}\n\nКосячных звонков за день не найдено.")
+        max_broadcast_message(
+            token, targets, f"{site.label}\n\nКосячных звонков за день не найдено."
+        )
         print("[DONE] no problematic calls")
         return
 
@@ -186,8 +186,8 @@ def main() -> None:
         docx_path = docx_dir / f"{prefix}_{time_key}_{phone}.docx"
         write_docx(docx_path, prefix, time_hms, direction, phone, transcript, branch=branch)
 
-        tg_broadcast_message(token, chat_ids, comment)
-        tg_broadcast_document(token, chat_ids, docx_path, site.label)
+        max_broadcast_message(token, targets, comment)
+        max_broadcast_document(token, targets, docx_path, site.label)
         sent += 1
         print(f"[OK] {assessment.verdict} {html_path.name}")
 

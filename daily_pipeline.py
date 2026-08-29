@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Daily Mango call pipeline: auto-select, DOCX export, Telegram send."""
+"""Daily Mango call pipeline: auto-select, DOCX export, MAX send."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ from call_qc import CallAssessment, assess_call, format_day_summary
 from mango_sync import fetch_site_day_calls, sync_day
 from mango_vpbx import MangoVpbxClient
 from telegram_format import build_call_message, format_date_no_year, format_time_short
+from max_notify import _max_targets_for_site, max_broadcast_document, max_broadcast_message
 from site_config import SiteConfig, load_sites
-from telegram_notify import site_chat_ids
 from transcript_utils import extract_datetime, parse_transcript_file, transcript_paragraphs
 
 try:
@@ -146,28 +146,20 @@ def count_day_directions(day_calls: list) -> Tuple[int, int]:
     return incoming, outgoing
 
 
-def _safe_tg_broadcast_message(
-    token: str,
-    chat_ids: List[str],
-    text: str,
-    *,
-    parse_mode: str | None = None,
+def _safe_max_broadcast_message(token: str, targets: List[Tuple[str, str]], text: str) -> None:
+    try:
+        max_broadcast_message(token, targets, text)
+    except Exception as exc:
+        print(f"[WARN] MAX summary failed: {exc}")
+
+
+def _safe_max_broadcast_document(
+    token: str, targets: List[Tuple[str, str]], file_path: Path, caption: str
 ) -> None:
-    from telegram_notify import tg_broadcast_message
-
     try:
-        tg_broadcast_message(token, chat_ids, text, parse_mode=parse_mode)
+        max_broadcast_document(token, targets, file_path, caption)
     except Exception as exc:
-        print(f"[WARN] Telegram summary failed: {exc}")
-
-
-def _safe_tg_broadcast_document(token: str, chat_ids: List[str], file_path: Path, caption: str) -> None:
-    from telegram_notify import tg_broadcast_document
-
-    try:
-        tg_broadcast_document(token, chat_ids, file_path, caption)
-    except Exception as exc:
-        print(f"[WARN] Telegram document failed ({file_path.name}): {exc}")
+        print(f"[WARN] MAX document failed ({file_path.name}): {exc}")
 
 
 def run_site_pipeline(
@@ -178,7 +170,7 @@ def run_site_pipeline(
     report_date,
     tz: ZoneInfo,
     token: str,
-    chat_ids: List[str],
+    targets: List[Tuple[str, str]],
     mango_sync: bool,
     dry_run: bool,
     force: bool,
@@ -260,11 +252,10 @@ def run_site_pipeline(
         ]
     )
     incoming, outgoing = count_day_directions(day_calls)
-    summary_parse = "HTML" if stats_unavailable else None
 
     if not selected:
         print("[INFO] No problematic calls found.")
-        if not dry_run and token and chat_ids:
+        if not dry_run and token and targets:
             summary = format_day_summary(
                 report_date_str,
                 incoming,
@@ -275,9 +266,9 @@ def run_site_pipeline(
                 site_label=site.label,
                 stats_unavailable=stats_unavailable,
             )
-            _safe_tg_broadcast_message(token, chat_ids, summary, parse_mode=summary_parse)
-            _safe_tg_broadcast_message(
-                token, chat_ids, f"{site.label}\n\nКосячных звонков за день не найдено."
+            _safe_max_broadcast_message(token, targets, summary)
+            _safe_max_broadcast_message(
+                token, targets, f"{site.label}\n\nКосячных звонков за день не найдено."
             )
         return
 
@@ -298,7 +289,7 @@ def run_site_pipeline(
 
     if not to_send:
         print("[INFO] Nothing new to send.")
-        if not dry_run and token and chat_ids:
+        if not dry_run and token and targets:
             summary = format_day_summary(
                 report_date_str,
                 incoming,
@@ -309,16 +300,16 @@ def run_site_pipeline(
                 site_label=site.label,
                 stats_unavailable=stats_unavailable,
             )
-            _safe_tg_broadcast_message(token, chat_ids, summary, parse_mode=summary_parse)
+            _safe_max_broadcast_message(token, targets, summary)
             if all_bad + all_uncertain:
                 note = f"{site.label}\n\nКосячные звонки ({all_bad + all_uncertain}) уже были отправлены ранее."
             else:
                 note = f"{site.label}\n\nКосячных звонков за день не найдено."
-            _safe_tg_broadcast_message(token, chat_ids, note)
+            _safe_max_broadcast_message(token, targets, note)
         return
 
-    if not dry_run and (not token or not chat_ids):
-        raise SystemExit("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env")
+    if not dry_run and (not token or not targets):
+        raise SystemExit("Set MAX_BOT_TOKEN and MAX_OWNER_USER_ID / MAX_*_CHAT_ID in .env")
 
     sent_bad = sum(1 for item in to_send if item.get("verdict") == "bad")
     sent_uncertain = sum(1 for item in to_send if item.get("verdict") == "uncertain")
@@ -334,7 +325,7 @@ def run_site_pipeline(
             site_label=site.label,
             stats_unavailable=stats_unavailable,
         )
-        _safe_tg_broadcast_message(token, chat_ids, summary, parse_mode=summary_parse)
+        _safe_max_broadcast_message(token, targets, summary)
 
     sent = 0
     for idx, item in enumerate(to_send, start=1):
@@ -368,8 +359,8 @@ def run_site_pipeline(
             print(f"[DRY-RUN] {file_name} -> {docx_path.name}")
             continue
 
-        _safe_tg_broadcast_message(token, chat_ids, comment)
-        _safe_tg_broadcast_document(token, chat_ids, docx_path, site.label)
+        _safe_max_broadcast_message(token, targets, comment)
+        _safe_max_broadcast_document(token, targets, docx_path, site.label)
         state[file_name] = f"{file_name}:{html_path.stat().st_mtime_ns}"
         sent += 1
         print(f"[OK] Sent {file_name}")
@@ -393,7 +384,7 @@ def main() -> None:
 
     base = Path(args.base_dir).resolve()
     load_dotenv(base / args.dotenv)
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    token = os.getenv("MAX_BOT_TOKEN", "").strip()
 
     if args.git_pull:
         git_pull(base)
@@ -411,7 +402,7 @@ def main() -> None:
         tz = ZoneInfo(site.tz_name)
         report_date = (datetime.now(tz) - timedelta(days=max(args.mango_days, 1))).date()
         report_date_str = report_date.isoformat()
-        chat_ids = site_chat_ids(site)
+        targets = _max_targets_for_site(site)
         run_site_pipeline(
             site,
             base,
@@ -419,7 +410,7 @@ def main() -> None:
             report_date=report_date,
             tz=tz,
             token=token,
-            chat_ids=chat_ids,
+            targets=targets,
             mango_sync=args.mango_sync,
             dry_run=args.dry_run,
             force=args.force,
