@@ -12,6 +12,8 @@ from typing import Any
 
 from .parse import ParsedTx
 
+UNLABELED_CATEGORY = "Переводы без разметки"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS imports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -248,11 +250,16 @@ class FinanceStore:
         user_note: str = "",
         is_internal: bool = False,
     ) -> dict[str, Any]:
-        if kind not in {"expense", "income", "transfer"}:
-            raise ValueError("kind must be expense, income or transfer")
-        internal = 1 if is_internal or kind == "transfer" else 0
-        if internal:
-            kind = "transfer"
+        if kind not in {"expense", "income", "transfer", "unlabeled"}:
+            raise ValueError("kind must be expense, income, transfer or unlabeled")
+        if kind == "unlabeled":
+            internal = 0
+            kind = "unlabeled"
+            user_category = UNLABELED_CATEGORY
+        else:
+            internal = 1 if is_internal or kind == "transfer" else 0
+            if internal:
+                kind = "transfer"
         with self.connect() as conn:
             cur = conn.execute(
                 """
@@ -268,6 +275,16 @@ class FinanceStore:
         row = self.get_transaction(tx_id)
         assert row is not None
         return row
+
+    def leave_unlabeled(self, tx_id: int | None = None) -> list[dict[str, Any]]:
+        """Park one or all queued transfers in «Переводы без разметки»."""
+        if tx_id is not None:
+            return [self.review_transaction(tx_id, kind="unlabeled")]
+        pending = self.list_transactions(needs_review=True, limit=2000)
+        out = []
+        for row in pending:
+            out.append(self.review_transaction(int(row["id"]), kind="unlabeled"))
+        return out
 
     def categories(self) -> dict[str, list[str]]:
         with self.connect() as conn:
@@ -285,7 +302,7 @@ class FinanceStore:
         for row in rows:
             kind = row["kind"] if row["kind"] in buckets else "expense"
             cat = (row["cat"] or "").strip()
-            if cat:
+            if cat and cat != UNLABELED_CATEGORY:
                 buckets[kind].add(cat)
         return {k: sorted(v, key=str.lower) for k, v in buckets.items()}
 
@@ -422,12 +439,23 @@ def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> d
     expense_cats: dict[str, float] = {}
     pending: list[dict[str, Any]] = []
 
+    unlabeled_sum = 0.0
+    unlabeled: list[dict[str, Any]] = []
+
     for row in txs:
         amount = float(row["amount"])
         if int(row.get("needs_review") or 0) == 1:
             unreviewed_count += 1
             unreviewed_sum += amount
             pending.append(public_tx(row))
+            continue
+        if (row.get("kind") == "unlabeled") or (row.get("user_category") == UNLABELED_CATEGORY):
+            unlabeled.append(public_tx(row))
+            unlabeled_sum += amount
+            if amount > 0:
+                income += abs(amount)
+            else:
+                expense += abs(amount)
             continue
         if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
             internal += amount
@@ -451,6 +479,9 @@ def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> d
         "income_by_category": _sorted_cats(income_cats),
         "expense_by_category": _sorted_cats(expense_cats),
         "unreviewed": pending,
+        "unlabeled_count": len(unlabeled),
+        "unlabeled_sum": round(unlabeled_sum, 2),
+        "unlabeled": unlabeled,
         "tx_count": len(txs),
     }
 

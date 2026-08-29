@@ -50,3 +50,18 @@ def test_unreviewed_not_in_pnl_until_explained(tmp_path: Path) -> None:
     cats = {c["name"]: c["amount"] for c in after["expense_by_category"]}
     assert cats["Подарки"] == 50000
     assert cats["Супермаркеты"] == 1250.5
+
+
+def test_leave_unlabeled_parks_outside_queue(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(TINKOFF)), "ops.csv")
+    pending = store.list_transactions(needs_review=True)
+    store.leave_unlabeled(int(pending[0]["id"]))
+    summary = store.summary("2026-08-01", "2026-08-31")
+    assert summary["unreviewed_count"] == 0
+    assert summary["unlabeled_count"] == 1
+    assert summary["unlabeled_sum"] == -50000
+    assert summary["expense"] == 2140.5 + 50000
+    names = {c["name"] for c in summary["expense_by_category"]}
+    assert "Переводы без разметки" not in names
+    assert "Подарки" not in names

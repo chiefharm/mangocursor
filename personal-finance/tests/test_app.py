@@ -97,3 +97,17 @@ def test_pdf_is_not_rejected_as_spreadsheet(client: TestClient) -> None:
     assert "CSV или Excel (.xlsx)" not in detail
     assert "xlsx" not in detail.lower()
     assert "PDF" in detail or "pdf" in detail.lower()
+
+
+def test_leave_unlabeled_via_api(client: TestClient) -> None:
+    path = _write(TINKOFF)
+    with path.open("rb") as fh:
+        client.post("/api/import", files={"file": ("ops.csv", fh, "text/csv")})
+    p2p = client.get("/api/review").json()["transactions"][0]
+    res = client.post("/api/review/unlabeled", json={"id": p2p["id"]})
+    assert res.status_code == 200, res.text
+    assert res.json()["review_count"] == 0
+    summary = client.get("/api/summary?year=2026&month=8").json()["summary"]
+    assert summary["unreviewed_count"] == 0
+    assert summary["unlabeled_count"] == 1
+    assert summary["unlabeled"][0]["user_category"] == "Переводы без разметки"

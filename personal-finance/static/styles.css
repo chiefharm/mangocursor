@@ -46,7 +46,7 @@ button:active { transform: translateY(1px); }
 .app-shell {
   max-width: 640px;
   margin: 0 auto;
-  padding: calc(10px + var(--safe-top)) 16px calc(40px + var(--safe-bottom));
+  padding: calc(10px + var(--safe-top)) 16px calc(92px + var(--safe-bottom));
 }
 
 .demo-ribbon {
@@ -443,6 +443,83 @@ textarea, .text-input {
   background: var(--line);
 }
 .progress-dots span.on { background: var(--gold); }
+
+.queue-title {
+  margin: 4px 0 8px;
+  font-size: 32px;
+  line-height: 1;
+}
+.tx-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 12px 0;
+  min-height: 52px;
+  font: inherit;
+  color: inherit;
+}
+.tx-row:last-child { border-bottom: 0; }
+button.tx-row { cursor: pointer; }
+.tx-desc { font-size: 14px; line-height: 1.35; }
+.tx-sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.tx-amt { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tx-amt.neg { color: var(--out); }
+.tx-amt.pos { color: var(--in); }
+.unlabeled-card { border-color: rgba(163, 59, 44, 0.22); }
+
+.tabbar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 0;
+  width: min(640px, 100%);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px 16px calc(10px + var(--safe-bottom));
+  background: linear-gradient(180deg, transparent, var(--bg) 30%);
+  z-index: 5;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-weight: 600;
+}
+.tab.on { background: var(--accent); color: #f7f1e6; border-color: var(--accent); }
+.tab.hot:not(.on) {
+  border-color: var(--out);
+  color: var(--out);
+  box-shadow: 0 0 0 1px rgba(163, 59, 44, 0.25);
+}
+.tab-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 99px;
+  background: var(--out);
+  color: #fff;
+  font-size: 12px;
+  animation: pulse-hot 1.6s ease-in-out infinite;
+}
+.tab.on .tab-badge { background: #f7f1e6; color: var(--out); }
+@keyframes pulse-hot {
+  50% { transform: scale(1.08); opacity: 0.85; }
+}
 
 @media (max-width: 520px) {
   .banner { flex-direction: column; align-items: stretch; }
