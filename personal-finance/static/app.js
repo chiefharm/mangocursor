@@ -12,6 +12,8 @@ const state = {
   view: "home",
   notice: "",
   ops: null,
+  editOp: null,
+  editFrom: "ops",
 };
 
 const money = (n, signed = false) => {
@@ -66,6 +68,11 @@ function render() {
   if (state.view === "ops") {
     app.innerHTML = opsView();
     bindOps();
+    return;
+  }
+  if (state.view === "edit-op") {
+    app.innerHTML = editOpView();
+    bindEditOp();
     return;
   }
   app.innerHTML = homeView();
@@ -256,7 +263,7 @@ function queueView() {
 function tabBar() {
   const n = Number(state.review?.count ?? state.summary?.summary?.unreviewed_count ?? 0);
   const onQueue = state.view === "queue" || state.view === "review";
-  const onHome = state.view === "home" || state.view === "ops";
+  const onHome = state.view === "home" || state.view === "ops" || state.view === "edit-op";
   return `
     <nav class="tabbar">
       <button type="button" class="tab ${onHome ? "on" : ""}" id="tab-home">Сводка</button>
@@ -280,8 +287,8 @@ function unlabeledCard(s) {
         <h2>Переводы без разметки</h2>
         <span class="muted">${money(Math.abs(s.unlabeled_sum || 0))}</span>
       </div>
-      <p class="hint">Оставили без статьи. В сальдо входят, в обычные категории — нет.</p>
-      ${rows.map((t) => txRow(t)).join("")}
+      <p class="hint">Оставили без статьи. В сальдо входят, в обычные категории — нет. Нажмите — можно задать статью.</p>
+      ${rows.map((t) => txRow(t, "edit")).join("")}
     </section>`;
 }
 
@@ -299,18 +306,63 @@ function opsView() {
       <h1 class="queue-title serif">${esc(title)}</h1>
       <p class="hint">${ops.loading
         ? "Загрузка…"
-        : `${rows.length} ${plural(rows.length, "операция", "операции", "операций")} · ${money(ops.sum || 0)}`}</p>
+        : `${rows.length} ${plural(rows.length, "операция", "операции", "операций")} · ${money(ops.sum || 0)}. Нажмите строку — можно сменить статью.`}</p>
       ${rows.length ? `
         <section class="card">
-          ${rows.map((t) => txRow(t, "", showCat)).join("")}
+          ${rows.map((t) => txRow(t, "edit", showCat)).join("")}
         </section>` : (ops.loading ? "" : `<p class="empty">Операций нет</p>`)}
       ${tabBar()}
     </div>`;
 }
 
+function editOpView() {
+  const t = state.editOp;
+  if (!t) {
+    return `
+      <div class="app-shell">
+        <div class="topbar"><div class="brand">Касса</div></div>
+        <p class="empty">Операция не найдена</p>
+        ${tabBar()}
+      </div>`;
+  }
+  const amtClass = t.amount < 0 ? "neg" : "pos";
+  const cat = currentCat(t);
+  return `
+    <div class="app-shell">
+      <div class="topbar">
+        <button class="ghost" id="edit-back">Назад</button>
+        <div class="brand">Касса</div>
+      </div>
+      <section class="hero">
+        <div class="label">${esc(fmtDate(t.posted_date))}</div>
+        <p class="net serif ${amtClass}">${money(t.amount, true)}</p>
+        <p class="desc">${esc(t.description || "Без описания")}</p>
+        <p class="sub">${cat ? `Сейчас: ${esc(cat)}` : "Статья не задана"}</p>
+      </section>
+      <section class="card" id="edit-card" data-id="${t.id}">
+        <h2>Статья</h2>
+        <p class="hint">Выберите из списка или напишите своё название.</p>
+        <div class="mode-row">
+          <button type="button" class="ghost" data-mode="expense">Расход</button>
+          <button type="button" class="ghost" data-mode="income">Доход</button>
+        </div>
+        <div class="chips" id="edit-chips"></div>
+        <input class="text-input" id="edit-cat" placeholder="Название статьи" value="${esc(cat)}" />
+        <button class="primary" id="save-cat" style="width:100%;margin-top:14px">Сохранить</button>
+        <div class="error" id="edit-error" hidden></div>
+      </section>
+      ${tabBar()}
+    </div>`;
+}
+
+function currentCat(t) {
+  return (t?.user_category || t?.bank_category || "").trim();
+}
+
 function txRow(t, action, showCat) {
   const cls = t.amount < 0 ? "neg" : "pos";
-  const open = action ? ` data-open="${t.id}"` : "";
+  const open = action === "open-review" ? ` data-open="${t.id}"`
+    : action === "edit" ? ` data-edit="${t.id}"` : "";
   const tag = action ? "button" : "div";
   const type = action ? ` type="button"` : "";
   const cat = (t.user_category || t.bank_category || "").trim();
@@ -462,6 +514,7 @@ function bindHome() {
   file?.addEventListener("change", () => { if (file.files[0]) upload(file.files[0]); });
   $("#pull-drive")?.addEventListener("click", pullDrive);
   bindOpsHits();
+  bindEditHits();
 }
 
 function bindOpsHits() {
@@ -478,7 +531,139 @@ function bindOps() {
   $("#ops-back")?.addEventListener("click", () => {
     state.view = "home";
     state.ops = null;
+    state.editOp = null;
     render();
+  });
+  bindEditHits();
+}
+
+function bindEditHits() {
+  document.querySelectorAll("[data-edit]").forEach((el) => {
+    el.addEventListener("click", () => openEditOp(el.getAttribute("data-edit")));
+  });
+}
+
+function opKind(t) {
+  if (t?.kind === "income") return "income";
+  if (t?.kind === "expense") return "expense";
+  return Number(t?.amount) > 0 ? "income" : "expense";
+}
+
+async function openEditOp(id) {
+  const fromOps = (state.ops?.transactions || []).find((t) => String(t.id) === String(id));
+  const fromUnlabeled = (state.summary?.summary?.unlabeled || []).find((t) => String(t.id) === String(id));
+  let tx = fromOps || fromUnlabeled;
+  state.editFrom = (fromOps || state.view === "ops") ? "ops"
+    : (state.view === "queue" ? "queue" : "home");
+  try {
+    if (!tx) {
+      const res = await api(`/api/transactions/${id}`);
+      tx = res.transaction;
+    }
+    if (!state.review?.categories) {
+      state.review = await api("/api/review");
+    }
+    state.editOp = tx;
+    state.view = "edit-op";
+    render();
+  } catch (err) {
+    alert(err.data?.detail || err.message || "Не удалось открыть операцию");
+  }
+}
+
+function bindEditOp() {
+  bindTabs();
+  $("#edit-back")?.addEventListener("click", () => {
+    state.editOp = null;
+    if (state.editFrom === "ops" && state.ops) {
+      state.view = "ops";
+      render();
+      return;
+    }
+    if (state.editFrom === "queue") {
+      state.view = "queue";
+      render();
+      return;
+    }
+    state.view = "home";
+    render();
+  });
+  const t = state.editOp;
+  if (!t) return;
+  const cats = state.review?.categories || { expense: [], income: [] };
+  const chips = $("#edit-chips");
+  const input = $("#edit-cat");
+  let mode = opKind(t);
+  let chosen = currentCat(t);
+
+  const paintChips = () => {
+    const list = [...new Set([
+      ...(mode === "income" ? cats.income : cats.expense),
+      chosen,
+    ].filter((name) => name && name !== "Переводы без разметки"))];
+    chips.innerHTML = list.map((name) =>
+      `<button type="button" class="chip ${chosen === name ? "on" : ""}" data-cat="${esc(name)}">${esc(name)}</button>`
+    ).join("");
+    chips.querySelectorAll(".chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        chosen = btn.dataset.cat;
+        input.value = chosen;
+        paintChips();
+      });
+    });
+  };
+
+  const setMode = (next) => {
+    mode = next;
+    document.querySelectorAll("[data-mode]").forEach((b) => {
+      b.className = b.dataset.mode === mode ? "primary" : "ghost";
+    });
+    paintChips();
+  };
+  document.querySelectorAll("[data-mode]").forEach((b) => {
+    b.addEventListener("click", () => setMode(b.dataset.mode));
+  });
+  input.addEventListener("input", () => {
+    chosen = input.value.trim();
+    paintChips();
+  });
+  setMode(mode);
+
+  $("#save-cat").addEventListener("click", async () => {
+    const user_category = input.value.trim() || chosen;
+    const box = $("#edit-error");
+    if (!user_category) {
+      box.hidden = false;
+      box.textContent = "Напишите или выберите статью";
+      return;
+    }
+    try {
+      await api(`/api/transactions/${t.id}/category`, {
+        method: "POST",
+        body: { kind: mode, user_category },
+      });
+      state.notice = `Статья: ${user_category}`;
+      const from = state.editFrom;
+      const ops = state.ops;
+      state.editOp = null;
+      const [summary, review] = await Promise.all([
+        api(`/api/summary?year=${state.year}&month=${state.month}`),
+        api("/api/review"),
+      ]);
+      state.summary = summary;
+      state.review = review;
+      if (from === "ops" && ops) {
+        await showOps(ops.bucket, ops.category);
+      } else if (from === "queue") {
+        await showQueue();
+      } else {
+        state.view = "home";
+        render();
+      }
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не сохранилось";
+    }
   });
 }
 
@@ -576,6 +761,7 @@ function bindQueue() {
     }
   });
   bindAcceptIncome();
+  bindEditHits();
 }
 
 function bindReview() {

@@ -368,6 +368,31 @@ async def transactions(
     return {"ok": True, "transactions": [public_tx(r) for r in rows]}
 
 
+@app.get("/api/transactions/{tx_id}")
+async def get_transaction(tx_id: int) -> dict:
+    row = store.get_transaction(tx_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Операция не найдена")
+    return {"ok": True, "transaction": public_tx(row)}
+
+
+@app.post("/api/transactions/{tx_id}/category")
+async def recategorize(tx_id: int, request: Request) -> dict:
+    body = await request.json()
+    try:
+        row = store.recategorize(
+            tx_id,
+            user_category=str(body.get("user_category") or ""),
+            kind=str(body.get("kind") or "") or None,
+            user_note=None if "user_note" not in body else str(body.get("user_note") or ""),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Операция не найдена") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "transaction": public_tx(row)}
+
+
 @app.get("/api/review")
 async def review_queue() -> dict:
     rows = store.list_transactions(needs_review=True, limit=200)

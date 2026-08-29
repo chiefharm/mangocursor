@@ -113,3 +113,16 @@ def test_ledger_lists_ops_behind_category_and_totals(tmp_path: Path) -> None:
     assert [row["description"] for row in still_food] == ["PYATEROCHKA"]
 
 
+def test_recategorize_moves_operation_between_articles(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(TINKOFF)), "ops.csv")
+    food = store.list_ledger("2026-08-01", "2026-08-31", bucket="expense", category="Супермаркеты")
+    updated = store.recategorize(int(food[0]["id"]), user_category="Продукты")
+    assert updated["user_category"] == "Продукты"
+    summary = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Продукты"] == 1250.5
+    assert "Супермаркеты" not in names
+
+
+

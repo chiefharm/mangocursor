@@ -149,3 +149,29 @@ def test_transactions_by_category_via_api(client: TestClient) -> None:
     assert income["transactions"][0]["description"] == "Иван Иванов"
 
 
+def test_recategorize_via_api(client: TestClient) -> None:
+    path = _write(TINKOFF)
+    with path.open("rb") as fh:
+        client.post("/api/import", files={"file": ("ops.csv", fh, "text/csv")})
+    food = client.get(
+        "/api/transactions",
+        params={"year": 2026, "month": 8, "bucket": "expense", "category": "Супермаркеты"},
+    ).json()["transactions"][0]
+    res = client.post(
+        f"/api/transactions/{food['id']}/category",
+        json={"user_category": "Продукты", "kind": "expense"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["transaction"]["user_category"] == "Продукты"
+    summary = client.get("/api/summary?year=2026&month=8").json()["summary"]
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Продукты"] == 1250.5
+    assert "Супермаркеты" not in names
+    empty = client.post(
+        f"/api/transactions/{food['id']}/category",
+        json={"user_category": "  "},
+    )
+    assert empty.status_code == 400
+
+
+

@@ -301,6 +301,36 @@ class FinanceStore:
         assert row is not None
         return row
 
+    def recategorize(
+        self,
+        tx_id: int,
+        *,
+        user_category: str,
+        kind: str | None = None,
+        user_note: str | None = None,
+    ) -> dict[str, Any]:
+        """Change the P&L article on an already imported operation."""
+        cat = (user_category or "").strip()
+        if not cat:
+            raise ValueError("Укажите статью")
+        row = self.get_transaction(tx_id)
+        if row is None:
+            raise KeyError(tx_id)
+        note = (row.get("user_note") or "") if user_note is None else user_note
+        chosen = (kind or "").strip()
+        if chosen not in {"income", "expense", "transfer"}:
+            if float(row.get("amount") or 0) > 0:
+                chosen = "income"
+            else:
+                chosen = "expense"
+        return self.review_transaction(
+            tx_id,
+            kind=chosen,
+            user_category=cat,
+            user_note=str(note or ""),
+            is_internal=chosen == "transfer",
+        )
+
     def leave_unlabeled(self, tx_id: int | None = None) -> list[dict[str, Any]]:
         """Park one or all queued transfers in «Переводы без разметки»."""
         if tx_id is not None:
