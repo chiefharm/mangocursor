@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from app.parse import parse_statement
-from app.store import FinanceStore
+from app.store import FinanceStore, tx_uid
 from tests.test_parse import TINKOFF, _write
 
 
@@ -23,6 +23,25 @@ def test_import_dedup_and_review_queue(tmp_path: Path) -> None:
     again = store.import_transactions(txs, "ops.csv")
     assert again.new_count == 0
     assert again.dup_count == 5
+
+
+def test_posted_uid_stays_compatible_without_hold_suffix() -> None:
+    import hashlib
+
+    txs = parse_statement(_write(TINKOFF))
+    food = next(t for t in txs if t.description == "PYATEROCHKA")
+    legacy = "|".join(
+        [
+            food.posted_at.strftime("%Y-%m-%d %H:%M:%S"),
+            f"{food.amount:.2f}",
+            food.description,
+            food.card,
+            food.mcc,
+            food.category,
+        ]
+    )
+    assert tx_uid(food) == hashlib.sha256(legacy.encode("utf-8")).hexdigest()
+    assert not tx_uid(food).endswith("hold")
 
 
 def test_unreviewed_not_in_pnl_until_explained(tmp_path: Path) -> None:

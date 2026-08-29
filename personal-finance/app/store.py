@@ -80,19 +80,17 @@ def tx_is_hold(tx: ParsedTx) -> bool:
 
 
 def tx_uid(tx: ParsedTx) -> str:
-    hold = "hold" if tx_is_hold(tx) else ""
-    key = "|".join(
-        [
-            tx.posted_at.strftime("%Y-%m-%d %H:%M:%S"),
-            f"{tx.amount:.2f}",
-            tx.description,
-            tx.card,
-            tx.mcc,
-            tx.category,
-            hold,
-        ]
-    )
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+    parts = [
+        tx.posted_at.strftime("%Y-%m-%d %H:%M:%S"),
+        f"{tx.amount:.2f}",
+        tx.description,
+        tx.card,
+        tx.mcc,
+        tx.category,
+    ]
+    if tx_is_hold(tx):
+        parts.append("hold")
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 def _amount_date_clause(holds: bool) -> str:
