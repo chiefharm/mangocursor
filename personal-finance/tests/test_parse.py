@@ -8,7 +8,7 @@ from textwrap import dedent
 
 from openpyxl import Workbook
 
-from app.parse import ParseError, parse_amount, parse_statement, rows_to_transactions
+from app.parse import ParseError, parse_amount, parse_statement, rows_to_transactions, sniff_kind
 
 TINKOFF = dedent(
     """\
@@ -114,3 +114,16 @@ def test_parse_amount_formats() -> None:
     assert parse_amount("(200)") == -200
     assert parse_amount("1.500,00") == 1500
     assert parse_amount(12) == 12
+
+
+def test_sniff_pdf_without_extension(tmp_path: Path) -> None:
+    pdf = tmp_path / "Выписка_по_счёту"
+    pdf.write_bytes(b"%PDF-1.3\n%\xe2\xe3\xcf\xd3\n")
+    assert sniff_kind(pdf, "Выписка_по_счёту") == "pdf"
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 8)
+    try:
+        sniff_kind(photo, "photo.jpg")
+        raise AssertionError("photo must fail")
+    except ParseError:
+        pass

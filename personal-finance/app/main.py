@@ -210,10 +210,7 @@ async def logout() -> JSONResponse:
 
 @app.post("/api/import")
 async def import_statement(file: UploadFile = File(...)) -> dict:
-    filename = file.filename or "statement.csv"
-    suffix = Path(filename).suffix.lower()
-    if suffix not in ALLOWED_SUFFIX:
-        raise HTTPException(status_code=400, detail="Нужен файл CSV, Excel или PDF")
+    filename = file.filename or "statement"
     dest = UPLOAD_DIR / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{_safe_name(filename)}"
     size = 0
     with dest.open("wb") as out:

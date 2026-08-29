@@ -134,10 +134,10 @@ function homeView() {
         ${state.me.drive ? `<button class="primary" id="pull-drive" style="width:100%;margin-bottom:12px">Забрать с Google Drive</button>` : ""}
         <label class="drop" id="drop">
           <strong>Вложить выписку</strong>
-          <p>PDF, CSV или Excel — Альфа, Тинькофф, Сбер</p>
-          <input id="file" type="file" accept=".pdf,.csv,.xlsx,.xls,.txt" />
+          <p>На iPhone: Обзор → Загрузки. PDF Альфа подходит, расширение не обязательно.</p>
+          <input id="file" type="file" />
         </label>
-        <p class="hint">Имя файла не важно — даты беру из операций внутри. Новые строки добавятся, старые не задвоятся. Переводы без статьи откроются в очереди.</p>
+        <p class="hint">Если файл серый и не нажимается — обновите эту страницу. Не фото, а «Обзор». Имя файла не важно: даты беру из операций внутри.</p>
         <div class="error" id="upload-error" hidden></div>
       </section>
       <section class="card">

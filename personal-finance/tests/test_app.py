@@ -74,3 +74,14 @@ def test_bad_file(client: TestClient) -> None:
         files={"file": ("notes.txt", b"hello", "text/plain")},
     )
     assert res.status_code == 400
+
+
+def test_upload_iphone_name_without_extension(client: TestClient) -> None:
+    path = _write(TINKOFF)
+    with path.open("rb") as fh:
+        res = client.post(
+            "/api/import",
+            files={"file": ("Выписка_по_счёту", fh, "application/octet-stream")},
+        )
+    assert res.status_code == 200, res.text
+    assert res.json()["import"]["new_count"] == 5

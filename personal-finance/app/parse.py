@@ -110,14 +110,40 @@ class ParseError(ValueError):
     pass
 
 
-def parse_statement(path: str | Path, *, filename: str | None = None) -> list[ParsedTx]:
+def sniff_kind(path: str | Path, filename: str | None = None) -> str:
+    """What the file actually is — iPhone often drops the .pdf extension."""
     path = Path(path)
     name = (filename or path.name).lower()
-    if name.endswith(".pdf"):
+    suffix = Path(name).suffix.lower()
+    head = b""
+    try:
+        head = path.read_bytes()[:16]
+    except OSError:
+        pass
+    if head.startswith(b"\xff\xd8") or head.startswith(b"\x89PNG") or head.startswith(b"GIF8"):
+        raise ParseError("Это фото или картинка. Нужен файл выписки: PDF, CSV или Excel.")
+    if head.startswith(b"%PDF") or suffix == ".pdf":
+        return "pdf"
+    ole = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    if head.startswith(ole) or suffix == ".xls":
+        return "xls"
+    if head.startswith(b"PK") or suffix == ".xlsx":
+        return "xlsx"
+    if suffix in {".csv", ".txt"}:
+        return "csv"
+    if b"\x00" in head[:16]:
+        raise ParseError("Не похоже на банковскую выписку. Нужен PDF, CSV или Excel.")
+    return "csv"
+
+
+def parse_statement(path: str | Path, *, filename: str | None = None) -> list[ParsedTx]:
+    path = Path(path)
+    kind = sniff_kind(path, filename)
+    if kind == "pdf":
         from .parse_pdf import parse_pdf_statement
 
         return parse_pdf_statement(path, filename=filename or path.name)
-    if name.endswith(".xlsx") or name.endswith(".xls"):
+    if kind in {"xlsx", "xls"}:
         rows = _read_xlsx_rows(path)
     else:
         rows = _read_csv_rows(path)
