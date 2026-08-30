@@ -174,4 +174,46 @@ def test_recategorize_via_api(client: TestClient) -> None:
     assert empty.status_code == 400
 
 
+def test_rename_and_apply_mcc_via_api(client: TestClient) -> None:
+    csv = (
+        "Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;"
+        "Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание\n"
+        "15.08.2026 10:00:00;15.08.2026;*1111;OK;-1250,50;RUB;-1250,50;RUB;;Супермаркеты;5411;PYATEROCHKA\n"
+        "16.08.2026 12:00:00;16.08.2026;*1111;OK;-800,00;RUB;-800,00;RUB;;Супермаркеты;5411;MAGNIT\n"
+        "18.08.2026 09:00:00;18.08.2026;*1111;OK;-890,00;RUB;-890,00;RUB;;Кафе и рестораны;5812;COFFEE\n"
+    )
+    res = client.post("/api/import", files={"file": ("ops.csv", csv.encode("utf-8"), "text/csv")})
+    assert res.status_code == 200, res.text
+    food = client.get(
+        "/api/transactions",
+        params={"year": 2026, "month": 8, "bucket": "expense", "category": "Супермаркеты"},
+    ).json()["transactions"]
+    assert len(food) == 2
+    applied = client.post(
+        f"/api/transactions/{food[0]['id']}/apply-mcc",
+        json={"user_category": "Еда", "kind": "expense"},
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["count"] == 2
+    assert applied.json()["mcc"] == "5411"
+    renamed = client.post(
+        "/api/categories/rename",
+        json={"old_name": "Еда", "new_name": "Продукты", "kind": "expense"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["count"] == 2
+    summary = client.get("/api/summary?year=2026&month=8").json()["summary"]
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Продукты"] == 2050.5
+    assert "Еда" not in names
+    assert "Супермаркеты" not in names
+    created = client.post(
+        f"/api/transactions/{food[0]['id']}/category",
+        json={"user_category": "Кофе с собой", "kind": "expense"},
+    )
+    assert created.status_code == 200
+    chips = client.get("/api/review").json()["categories"]["expense"]
+    assert "Кофе с собой" in chips
+
+
 

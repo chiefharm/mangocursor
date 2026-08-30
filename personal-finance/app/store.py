@@ -66,6 +66,19 @@ CREATE TABLE IF NOT EXISTS category_stance (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mcc_map (
+    mcc TEXT PRIMARY KEY,
+    user_category TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'expense',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_categories (
+    name TEXT PRIMARY KEY,
+    kind TEXT NOT NULL DEFAULT 'expense',
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS statement_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename TEXT NOT NULL,
@@ -199,8 +212,48 @@ def _lookup_existing(conn: sqlite3.Connection, tx: ParsedTx) -> sqlite3.Row | No
     return None
 
 
+def _mcc_key(raw: str | None) -> str:
+    digits = re.sub(r"\D", "", str(raw or ""))
+    if len(digits) >= 4:
+        return digits[-4:]
+    return digits
+
+
+def _load_mcc_map(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    rows = conn.execute("SELECT * FROM mcc_map").fetchall()
+    return {_mcc_key(r["mcc"]): r for r in rows if _mcc_key(r["mcc"])}
+
+
+def _tx_has_mcc_rule(mcc: str | None, mcc_map: dict[str, sqlite3.Row]) -> bool:
+    return _mcc_key(mcc) in mcc_map
+
+
+def _apply_mcc_rule(
+    conn: sqlite3.Connection,
+    tx_id: int,
+    mcc: str | None,
+    mcc_map: dict[str, sqlite3.Row],
+) -> bool:
+    rule = mcc_map.get(_mcc_key(mcc))
+    if not rule:
+        return False
+    conn.execute(
+        """
+        UPDATE transactions
+        SET user_category = ?, kind = ?, needs_review = 0
+        WHERE id = ? AND is_internal = 0
+        """,
+        (rule["user_category"], rule["kind"] or "expense", tx_id),
+    )
+    return True
+
+
 def _refresh_existing(
-    conn: sqlite3.Connection, row: sqlite3.Row, tx: ParsedTx, uid: str
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    tx: ParsedTx,
+    uid: str,
+    mcc_map: dict[str, sqlite3.Row] | None = None,
 ) -> None:
     locked = bool((row["user_category"] or "").strip())
     extra_json = json.dumps(tx.extra or {}, ensure_ascii=False)
@@ -233,6 +286,8 @@ def _refresh_existing(
             row["id"],
         ),
     )
+    if not locked and not internal:
+        _apply_mcc_rule(conn, int(row["id"]), tx.mcc or row["mcc"], mcc_map or {})
 
 
 def _money_close(a: float | None, b: float | None) -> bool:
@@ -381,11 +436,12 @@ class FinanceStore:
                 (filename, now, period_from, period_to),
             )
             import_id = int(cur.lastrowid)
+            mcc_map = _load_mcc_map(conn)
             for tx in txs:
                 uid = tx_uid(tx)
                 existing = _lookup_existing(conn, tx)
                 if existing:
-                    _refresh_existing(conn, existing, tx, uid)
+                    _refresh_existing(conn, existing, tx, uid, mcc_map=mcc_map)
                     dup_count += 1
                     refreshed_count += 1
                     continue
@@ -425,6 +481,10 @@ class FinanceStore:
                     ),
                 )
                 new_ids.append(int(cur.lastrowid))
+                if not is_internal:
+                    _apply_mcc_rule(conn, int(cur.lastrowid), tx.mcc, mcc_map)
+                    if _tx_has_mcc_rule(tx.mcc, mcc_map):
+                        needs = 0
                 new_count += 1
                 if needs:
                     review_count += 1
@@ -586,6 +646,8 @@ class FinanceStore:
                 chosen = "income"
             else:
                 chosen = "expense"
+        if chosen != "transfer":
+            self.ensure_user_category(cat, chosen)
         return self.review_transaction(
             tx_id,
             kind=chosen,
@@ -593,6 +655,105 @@ class FinanceStore:
             user_note=str(note or ""),
             is_internal=chosen == "transfer",
         )
+
+    def ensure_user_category(self, name: str, kind: str = "expense") -> str:
+        cat = (name or "").strip()
+        if not cat:
+            raise ValueError("Укажите статью")
+        bucket = kind if kind in {"expense", "income", "transfer"} else "expense"
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_categories (name, kind, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET kind = excluded.kind
+                """,
+                (cat, bucket, now),
+            )
+        return cat
+
+    def rename_category(self, old_name: str, new_name: str, kind: str | None = None) -> dict[str, Any]:
+        old = (old_name or "").strip()
+        new = (new_name or "").strip()
+        if not old or not new:
+            raise ValueError("Нужны старое и новое название")
+        if old == INTERNAL_CATEGORY or new == INTERNAL_CATEGORY:
+            raise ValueError("Статью «Между своими» лучше не переименовывать")
+        bucket = kind if kind in {"expense", "income", "transfer"} else None
+        self.ensure_user_category(new, bucket or "expense")
+        with self.connect() as conn:
+            if old != new:
+                conn.execute("DELETE FROM user_categories WHERE name = ?", (old,))
+            sql = """
+                UPDATE transactions
+                SET user_category = ?
+                WHERE is_internal = 0
+                  AND TRIM(CASE WHEN user_category != '' THEN user_category ELSE bank_category END) = ?
+                """
+            args: list[Any] = [new, old]
+            if bucket == "income":
+                sql += " AND amount > 0"
+            elif bucket == "expense":
+                sql += " AND amount < 0"
+            cur = conn.execute(sql, args)
+            renamed = int(cur.rowcount)
+            conn.execute(
+                "UPDATE mcc_map SET user_category = ? WHERE user_category = ?",
+                (new, old),
+            )
+        return {"old_name": old, "new_name": new, "count": renamed}
+
+    def apply_mcc(
+        self,
+        tx_id: int,
+        *,
+        user_category: str,
+        kind: str | None = None,
+    ) -> dict[str, Any]:
+        row = self.get_transaction(tx_id)
+        if row is None:
+            raise KeyError(tx_id)
+        mcc = _mcc_key(str(row.get("mcc") or ""))
+        if not mcc:
+            raise ValueError("У этой операции нет MCC — отнести по коду нельзя")
+        updated = self.recategorize(tx_id, user_category=user_category, kind=kind)
+        chosen = (updated.get("kind") or "expense").strip()
+        if chosen not in {"income", "expense"}:
+            chosen = "expense" if float(row.get("amount") or 0) < 0 else "income"
+        self.ensure_user_category(user_category, chosen)
+        now = datetime.now().isoformat(timespec="seconds")
+        sign_sql = "amount < 0" if float(row.get("amount") or 0) < 0 else "amount > 0"
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO mcc_map (mcc, user_category, kind, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(mcc) DO UPDATE SET
+                    user_category = excluded.user_category,
+                    kind = excluded.kind,
+                    updated_at = excluded.updated_at
+                """,
+                (mcc, user_category.strip(), chosen, now),
+            )
+            cur = conn.execute(
+                """
+                UPDATE transactions
+                SET user_category = ?, kind = ?, needs_review = 0, is_internal = 0
+                WHERE substr('0000' || replace(replace(COALESCE(mcc,''), '*', ''), ' ', ''), -4) = ?
+                  AND is_internal = 0
+                  AND """
+                + sign_sql,
+                (user_category.strip(), chosen, mcc),
+            )
+            count = int(cur.rowcount)
+        return {
+            "mcc": mcc,
+            "user_category": user_category.strip(),
+            "kind": chosen,
+            "count": count,
+            "transaction": public_tx(self.get_transaction(tx_id) or updated),
+        }
 
     def leave_unlabeled(self, tx_id: int | None = None) -> list[dict[str, Any]]:
         """Park one or all queued transfers in «Переводы без разметки»."""
@@ -638,6 +799,13 @@ class FinanceStore:
             cat = (row["cat"] or "").strip()
             if cat and cat != UNLABELED_CATEGORY:
                 buckets[kind].add(cat)
+        with self.connect() as conn:
+            saved = conn.execute("SELECT name, kind FROM user_categories").fetchall()
+        for row in saved:
+            kind = row["kind"] if row["kind"] in buckets else "expense"
+            name = (row["name"] or "").strip()
+            if name and name != UNLABELED_CATEGORY:
+                buckets[kind].add(name)
         return {k: sorted(v, key=str.lower) for k, v in buckets.items()}
 
     def summary(self, date_from: str, date_to: str) -> dict[str, Any]:

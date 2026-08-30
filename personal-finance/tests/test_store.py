@@ -147,6 +147,63 @@ def test_recategorize_moves_operation_between_articles(tmp_path: Path) -> None:
     assert "Супермаркеты" not in names
 
 
+TWO_MCC = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+15.08.2026 10:00:00;15.08.2026;*1111;OK;-1250,50;RUB;-1250,50;RUB;;Супермаркеты;5411;PYATEROCHKA
+16.08.2026 12:00:00;16.08.2026;*1111;OK;-800,00;RUB;-800,00;RUB;;Супермаркеты;5411;MAGNIT
+18.08.2026 09:00:00;18.08.2026;*1111;OK;-890,00;RUB;-890,00;RUB;;Кафе и рестораны;5812;COFFEE
+"""
+
+
+def test_rename_category_moves_all_ops(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(TWO_MCC)), "mcc.csv")
+    result = store.rename_category("Супермаркеты", "Продукты", "expense")
+    assert result["count"] == 2
+    summary = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Продукты"] == 2050.5
+    assert "Супермаркеты" not in names
+    assert "Кафе и рестораны" in names
+    assert "Продукты" in store.categories()["expense"]
+
+
+def test_apply_mcc_updates_all_with_code_and_new_imports(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(TWO_MCC)), "mcc.csv")
+    food = store.list_ledger(
+        "2026-08-01", "2026-08-31", bucket="expense", category="Супермаркеты"
+    )
+    pyaterochka = next(row for row in food if row["description"] == "PYATEROCHKA")
+    result = store.apply_mcc(int(pyaterochka["id"]), user_category="Еда", kind="expense")
+    assert result["mcc"] == "5411"
+    assert result["count"] == 2
+    summary = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Еда"] == 2050.5
+    assert names["Кафе и рестораны"] == 890
+    extra = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+20.08.2026 10:00:00;20.08.2026;*1111;OK;-100,00;RUB;-100,00;RUB;;Супермаркеты;5411;LENTA
+"""
+    store.import_transactions(parse_statement(_write(extra)), "more.csv")
+    again = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in again["expense_by_category"]}
+    assert names["Еда"] == 2150.5
+
+
+def test_apply_mcc_without_code_fails(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(TINKOFF)), "ops.csv")
+    p2p = store.list_transactions(needs_review=True)[0]
+    try:
+        store.apply_mcc(int(p2p["id"]), user_category="Подарки")
+    except ValueError as exc:
+        assert "MCC" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 POSTED_TSUM = """
 Выписка по счету
 Операции по счету

@@ -395,6 +395,36 @@ async def recategorize(tx_id: int, request: Request) -> dict:
     return {"ok": True, "transaction": public_tx(row)}
 
 
+@app.post("/api/transactions/{tx_id}/apply-mcc")
+async def apply_mcc(tx_id: int, request: Request) -> dict:
+    body = await request.json()
+    try:
+        result = store.apply_mcc(
+            tx_id,
+            user_category=str(body.get("user_category") or ""),
+            kind=str(body.get("kind") or "") or None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Операция не найдена") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
+@app.post("/api/categories/rename")
+async def rename_category(request: Request) -> dict:
+    body = await request.json()
+    try:
+        result = store.rename_category(
+            str(body.get("old_name") or body.get("from") or ""),
+            str(body.get("new_name") or body.get("to") or ""),
+            str(body.get("kind") or "") or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
 @app.get("/api/review")
 async def review_queue() -> dict:
     rows = store.list_transactions(needs_review=True, limit=200)

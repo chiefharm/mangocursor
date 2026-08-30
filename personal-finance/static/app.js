@@ -310,6 +310,14 @@ function opsView() {
       <p class="hint">${ops.loading
         ? "Загрузка…"
         : `${rows.length} ${plural(rows.length, "операция", "операции", "операций")} · ${money(ops.sum || 0)}. Нажмите строку — можно сменить статью.`}</p>
+      ${ops.category && !ops.loading ? `
+        <section class="card">
+          <h2>Переименовать статью</h2>
+          <p class="hint">Новое имя сразу для всех операций в «${esc(ops.category)}».</p>
+          <input class="text-input" id="rename-cat" placeholder="Новое название" value="${esc(ops.category)}" />
+          <button class="primary" id="rename-cat-btn" style="width:100%;margin-top:12px">Сохранить название</button>
+          <div class="error" id="rename-error" hidden></div>
+        </section>` : ""}
       ${rows.length ? `
         <section class="card">
           ${rows.map((t) => txRow(t, "edit", showCat)).join("")}
@@ -330,6 +338,8 @@ function editOpView() {
   }
   const amtClass = t.amount < 0 ? "neg" : "pos";
   const cat = currentCat(t);
+  const mcc = (t.mcc || "").replace(/\D/g, "").slice(-4);
+  const mccLabel = mcc ? `MCC ${mcc}` : "";
   return `
     <div class="app-shell">
       <div class="topbar">
@@ -340,18 +350,20 @@ function editOpView() {
         <div class="label">${esc(fmtDate(t.posted_date))}</div>
         <p class="net serif ${amtClass}">${money(t.amount, true)}</p>
         <p class="desc">${esc(t.description || "Без описания")}</p>
-        <p class="sub">${isHold(t) ? "Операция в обработке · " : ""}${cat ? `Сейчас: ${esc(cat)}` : "Статья не задана"}</p>
+        <p class="sub">${isHold(t) ? "Операция в обработке · " : ""}${cat ? `Сейчас: ${esc(cat)}` : "Статья не задана"}${mccLabel ? ` · ${mccLabel}` : ""}</p>
       </section>
       <section class="card" id="edit-card" data-id="${t.id}">
         <h2>Статья</h2>
-        <p class="hint">Выберите из списка или напишите своё название.</p>
+        <p class="hint">Выберите из списка или напишите новое название — так создаётся своя статья.</p>
         <div class="mode-row">
           <button type="button" class="ghost" data-mode="expense">Расход</button>
           <button type="button" class="ghost" data-mode="income">Доход</button>
         </div>
         <div class="chips" id="edit-chips"></div>
         <input class="text-input" id="edit-cat" placeholder="Название статьи" value="${esc(cat)}" />
-        <button class="primary" id="save-cat" style="width:100%;margin-top:14px">Сохранить</button>
+        <button class="primary" id="save-cat" style="width:100%;margin-top:14px">Сохранить эту операцию</button>
+        ${mcc ? `<button class="ghost" id="apply-mcc" style="width:100%;margin-top:8px">Отнести все с этим кодом · MCC ${esc(mcc)}</button>` : ""}
+        ${cat && cat !== "Между своими" && cat !== "Не разобрано" ? `<button class="ghost" id="rename-article" style="width:100%;margin-top:8px">Переименовать статью «${esc(cat)}»</button>` : ""}
         <div class="error" id="edit-error" hidden></div>
       </section>
       ${tabBar()}
@@ -565,6 +577,29 @@ function bindOps() {
     render();
   });
   bindEditHits();
+  $("#rename-cat-btn")?.addEventListener("click", async () => {
+    const oldName = state.ops?.category || "";
+    const newName = ($("#rename-cat")?.value || "").trim();
+    const box = $("#rename-error");
+    if (!newName) {
+      if (box) { box.hidden = false; box.textContent = "Напишите новое название"; }
+      return;
+    }
+    try {
+      const res = await api("/api/categories/rename", {
+        method: "POST",
+        body: { old_name: oldName, new_name: newName, kind: state.ops?.bucket },
+      });
+      state.notice = `Статья «${oldName}» → «${newName}» · ${res.count || 0} ${plural(res.count || 0, "операция", "операции", "операций")}`;
+      await loadSummary();
+      await showOps(state.ops.bucket, newName);
+    } catch (err) {
+      if (box) {
+        box.hidden = false;
+        box.textContent = err.data?.detail || err.message || "Не переименовалось";
+      }
+    }
+  });
 }
 
 function bindEditHits() {
@@ -659,6 +694,28 @@ function bindEditOp() {
   });
   setMode(mode);
 
+  const afterEditSave = async (notice) => {
+    state.notice = notice;
+    const from = state.editFrom;
+    const ops = state.ops;
+    state.editOp = null;
+    const [summary, review] = await Promise.all([
+      api(`/api/summary?year=${state.year}&month=${state.month}`),
+      api("/api/review"),
+    ]);
+    state.summary = summary;
+    state.review = review;
+    if (from === "ops" && ops) {
+      const nextCat = (input.value || "").trim() || ops.category;
+      await showOps(ops.bucket, nextCat);
+    } else if (from === "queue") {
+      await showQueue();
+    } else {
+      state.view = "home";
+      render();
+    }
+  };
+
   $("#save-cat").addEventListener("click", async () => {
     const user_category = input.value.trim() || chosen;
     const box = $("#edit-error");
@@ -672,27 +729,52 @@ function bindEditOp() {
         method: "POST",
         body: { kind: mode, user_category },
       });
-      state.notice = `Статья: ${user_category}`;
-      const from = state.editFrom;
-      const ops = state.ops;
-      state.editOp = null;
-      const [summary, review] = await Promise.all([
-        api(`/api/summary?year=${state.year}&month=${state.month}`),
-        api("/api/review"),
-      ]);
-      state.summary = summary;
-      state.review = review;
-      if (from === "ops" && ops) {
-        await showOps(ops.bucket, ops.category);
-      } else if (from === "queue") {
-        await showQueue();
-      } else {
-        state.view = "home";
-        render();
-      }
+      await afterEditSave(`Статья: ${user_category}`);
     } catch (err) {
       box.hidden = false;
       box.textContent = err.data?.detail || err.message || "Не сохранилось";
+    }
+  });
+
+  $("#apply-mcc")?.addEventListener("click", async () => {
+    const user_category = input.value.trim() || chosen;
+    const box = $("#edit-error");
+    if (!user_category) {
+      box.hidden = false;
+      box.textContent = "Сначала напишите или выберите статью";
+      return;
+    }
+    try {
+      const res = await api(`/api/transactions/${t.id}/apply-mcc`, {
+        method: "POST",
+        body: { kind: mode, user_category },
+      });
+      await afterEditSave(`Код MCC ${res.mcc}: ${user_category} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`);
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не удалось отнести по коду";
+    }
+  });
+
+  $("#rename-article")?.addEventListener("click", async () => {
+    const newName = input.value.trim() || chosen;
+    const oldName = currentCat(t);
+    const box = $("#edit-error");
+    if (!newName) {
+      box.hidden = false;
+      box.textContent = "Напишите новое название статьи";
+      return;
+    }
+    try {
+      const res = await api("/api/categories/rename", {
+        method: "POST",
+        body: { old_name: oldName, new_name: newName, kind: mode },
+      });
+      if (state.ops?.category === oldName) state.ops.category = newName;
+      await afterEditSave(`Статья «${oldName}» → «${newName}» · ${res.count || 0} ${plural(res.count || 0, "операция", "операции", "операций")}`);
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не переименовалось";
     }
   });
 }
