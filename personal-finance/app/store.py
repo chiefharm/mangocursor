@@ -278,8 +278,8 @@ def _apply_desc_rule(
     conn.execute(
         """
         UPDATE transactions
-        SET user_category = ?, kind = ?, needs_review = 0
-        WHERE id = ? AND is_internal = 0
+        SET user_category = ?, kind = ?, needs_review = 0, is_internal = 0
+        WHERE id = ?
         """,
         (rule["user_category"], kind, tx_id),
     )
@@ -325,8 +325,9 @@ def _refresh_existing(
             row["id"],
         ),
     )
-    if not locked and not internal:
-        _apply_mcc_rule(conn, int(row["id"]), tx.mcc or row["mcc"], mcc_map or {})
+    if not locked:
+        if not internal:
+            _apply_mcc_rule(conn, int(row["id"]), tx.mcc or row["mcc"], mcc_map or {})
         _apply_desc_rule(
             conn,
             int(row["id"]),
@@ -530,16 +531,17 @@ class FinanceStore:
                     ),
                 )
                 new_ids.append(int(cur.lastrowid))
+                applied = False
                 if not is_internal:
                     applied = _apply_mcc_rule(conn, int(cur.lastrowid), tx.mcc, mcc_map)
-                    applied = (
-                        _apply_desc_rule(
-                            conn, int(cur.lastrowid), tx.description, tx.amount, desc_map
-                        )
-                        or applied
+                applied = (
+                    _apply_desc_rule(
+                        conn, int(cur.lastrowid), tx.description, tx.amount, desc_map
                     )
-                    if applied:
-                        needs = 0
+                    or applied
+                )
+                if applied:
+                    needs = 0
                 new_count += 1
                 if needs:
                     review_count += 1
@@ -851,11 +853,7 @@ class FinanceStore:
                 (key, user_category.strip(), chosen, now),
             )
             peers = conn.execute(
-                """
-                SELECT id, description, amount
-                FROM transactions
-                WHERE is_internal = 0
-                """
+                "SELECT id, description, amount FROM transactions"
             ).fetchall()
             ids = [
                 int(peer["id"])

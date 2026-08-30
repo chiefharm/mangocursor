@@ -258,12 +258,13 @@ def test_apply_description_via_api(client: TestClient) -> None:
 
 def test_review_later_buttons_are_tappable(client: TestClient) -> None:
     page = client.get("/").text
-    assert "static/app.js?v=18" in page
-    assert "static/styles.css?v=18" in page
+    assert "static/app.js?v=19" in page
+    assert "static/styles.css?v=19" in page
     js = client.get("/static/app.js").text
     assert 'id="review-later" data-nav="queue"' in js
     assert 'id="tab-queue" data-nav="queue"' in js
     assert 'id="apply-desc"' in js
+    assert "data-apply-desc" in js
     assert "apply-description" in js
     assert "function bindAppClicks()" in js
     assert "state.view = \"queue\";\n  state.reviewId = null;\n  render();" in js

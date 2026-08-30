@@ -296,11 +296,27 @@ function unlabeledCard(s) {
     </section>`;
 }
 
+function uniqueDescSeeds(rows) {
+  const seen = new Map();
+  for (const t of rows || []) {
+    const key = String(t.description || "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (!key || seen.has(key)) continue;
+    seen.set(key, t);
+  }
+  return [...seen.values()];
+}
+
+function shortDesc(text, n = 42) {
+  const d = String(text || "").trim();
+  return d.length > n ? `${d.slice(0, n)}…` : d;
+}
+
 function opsView() {
   const ops = state.ops || {};
   const rows = ops.transactions || [];
   const title = ops.title || "Операции";
   const showCat = !ops.category;
+  const seeds = uniqueDescSeeds(rows);
   return `
     <div class="app-shell">
       <div class="topbar">
@@ -318,6 +334,16 @@ function opsView() {
           <input class="text-input" id="rename-cat" placeholder="Новое название" value="${esc(ops.category)}" />
           <button class="primary" id="rename-cat-btn" style="width:100%;margin-top:12px">Сохранить название</button>
           <div class="error" id="rename-error" hidden></div>
+        </section>` : ""}
+      ${ops.category && !ops.loading && seeds.length ? `
+        <section class="card">
+          <h2>По описанию</h2>
+          <p class="hint">Найти все операции с тем же текстом и поставить статью «${esc(ops.category)}» — даже если сейчас они «между своими».</p>
+          ${seeds.map((t) => `
+            <button type="button" class="ghost" data-apply-desc="${t.id}" style="width:100%;margin-top:8px">
+              Добавить в статью все с таким описанием${seeds.length > 1 ? ` · ${esc(shortDesc(t.description))}` : ""}
+            </button>`).join("")}
+          <div class="error" id="apply-desc-error" hidden></div>
         </section>` : ""}
       ${rows.length ? `
         <section class="card">
@@ -576,6 +602,28 @@ function bindOps() {
     render();
   });
   bindEditHits();
+  document.querySelectorAll("[data-apply-desc]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const cat = (state.ops?.category || "").trim();
+      const box = $("#apply-desc-error");
+      if (!cat) return;
+      const kind = state.ops?.bucket === "income" ? "income" : "expense";
+      try {
+        const res = await api(`/api/transactions/${btn.getAttribute("data-apply-desc")}/apply-description`, {
+          method: "POST",
+          body: { user_category: cat, kind },
+        });
+        state.notice = `«${shortDesc(res.description, 36)}»: ${cat} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`;
+        await loadSummary();
+        await showOps(state.ops.bucket, cat);
+      } catch (err) {
+        if (box) {
+          box.hidden = false;
+          box.textContent = err.data?.detail || err.message || "Не удалось отнести по описанию";
+        }
+      }
+    });
+  });
   $("#rename-cat-btn")?.addEventListener("click", async () => {
     const oldName = state.ops?.category || "";
     const newName = ($("#rename-cat")?.value || "").trim();

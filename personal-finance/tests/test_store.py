@@ -256,6 +256,49 @@ def test_apply_description_without_text_fails(tmp_path: Path) -> None:
         raise AssertionError("expected ValueError")
 
 
+PIGGY = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+15.08.2026 10:00:00;15.08.2026;*1111;OK;-55,00;RUB;-55,00;RUB;;Переводы;;Перечисление средств в рамках услуги "Копилка для сдачи" со счета 1
+16.08.2026 12:00:00;16.08.2026;*1111;OK;-40,00;RUB;-40,00;RUB;;Переводы;;Перечисление средств в рамках услуги "Копилка для сдачи" со счета 1
+18.08.2026 09:00:00;18.08.2026;*1111;OK;-890,00;RUB;-890,00;RUB;;Кафе и рестораны;5812;COFFEE
+"""
+
+
+def test_apply_description_pulls_internal_piggy_bank(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(PIGGY)), "piggy.csv")
+    rows = [
+        r
+        for r in store.list_transactions(date_from="2026-08-01", date_to="2026-08-31")
+        if "копилка" in (r["description"] or "").lower()
+    ]
+    assert len(rows) == 2
+    assert all(int(r["is_internal"] or 0) == 1 for r in rows)
+    first = rows[0]
+    store.recategorize(int(first["id"]), user_category="Копилка", kind="expense")
+    result = store.apply_description(
+        int(first["id"]), user_category="Копилка", kind="expense"
+    )
+    assert result["count"] == 2
+    summary = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Копилка"] == 95
+    leftover = [
+        r
+        for r in store.list_transactions(date_from="2026-08-01", date_to="2026-08-31")
+        if "копилка" in (r["description"] or "").lower()
+    ]
+    assert all(int(r["is_internal"] or 0) == 0 for r in leftover)
+    extra = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+21.08.2026 10:00:00;21.08.2026;*1111;OK;-10,00;RUB;-10,00;RUB;;Переводы;;Перечисление средств в рамках услуги "Копилка для сдачи" со счета 1
+"""
+    store.import_transactions(parse_statement(_write(extra)), "more.csv")
+    again = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in again["expense_by_category"]}
+    assert names["Копилка"] == 105
+
+
 POSTED_TSUM = """
 Выписка по счету
 Операции по счету
