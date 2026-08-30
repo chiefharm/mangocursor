@@ -227,6 +227,7 @@ function reviewView() {
           <input class="text-input" id="custom-cat" placeholder="Своя статья" />
         </div>
         <button class="primary" id="save-review" style="width:100%;margin-top:14px">Сохранить</button>
+        ${(current.description || "").trim() ? `<button type="button" class="ghost" id="apply-desc" style="width:100%;margin-top:8px">Добавить в статью все с таким описанием</button>` : ""}
         <button class="ghost" id="leave-unlabeled" style="width:100%;margin-top:8px">Оставить неразмеченным</button>
         ${pendingIncome(items).length ? `<button class="primary income-all" id="accept-income-all" style="width:100%;margin-top:8px">Зачислить все доходы</button>` : ""}
         <div class="error" id="review-error" hidden></div>
@@ -362,6 +363,7 @@ function editOpView() {
         <div class="chips" id="edit-chips"></div>
         <input class="text-input" id="edit-cat" placeholder="Название статьи" value="${esc(cat)}" />
         <button class="primary" id="save-cat" style="width:100%;margin-top:14px">Сохранить эту операцию</button>
+        ${(t.description || "").trim() ? `<button type="button" class="ghost" id="apply-desc" style="width:100%;margin-top:8px">Добавить в статью все с таким описанием</button>` : ""}
         ${mcc ? `<button class="ghost" id="apply-mcc" style="width:100%;margin-top:8px">Отнести все с этим кодом · MCC ${esc(mcc)}</button>` : ""}
         ${cat && cat !== "Между своими" && cat !== "Не разобрано" ? `<button class="ghost" id="rename-article" style="width:100%;margin-top:8px">Переименовать статью «${esc(cat)}»</button>` : ""}
         <div class="error" id="edit-error" hidden></div>
@@ -752,6 +754,28 @@ function bindEditOp() {
     }
   });
 
+  $("#apply-desc")?.addEventListener("click", async () => {
+    const user_category = input.value.trim() || chosen;
+    const box = $("#edit-error");
+    if (!user_category) {
+      box.hidden = false;
+      box.textContent = "Сначала напишите или выберите статью";
+      return;
+    }
+    try {
+      const res = await api(`/api/transactions/${t.id}/apply-description`, {
+        method: "POST",
+        body: { kind: mode, user_category },
+      });
+      await afterEditSave(
+        `«${res.description}»: ${user_category} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`
+      );
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не удалось отнести по описанию";
+    }
+  });
+
   $("#rename-article")?.addEventListener("click", async () => {
     const newName = input.value.trim() || chosen;
     const oldName = currentCat(t);
@@ -952,6 +976,33 @@ function bindReview() {
       const box = $("#review-error");
       box.hidden = false;
       box.textContent = err.message || "Не сохранилось";
+    }
+  });
+  $("#apply-desc")?.addEventListener("click", async () => {
+    const custom = $("#custom-cat")?.value.trim();
+    const user_category = custom || chosen;
+    const box = $("#review-error");
+    if (mode === "transfer") {
+      box.hidden = false;
+      box.textContent = "Сначала выберите расход или доход";
+      return;
+    }
+    if (!user_category) {
+      box.hidden = false;
+      box.textContent = "Выберите или введите статью";
+      return;
+    }
+    try {
+      const res = await api(`/api/transactions/${card.dataset.id}/apply-description`, {
+        method: "POST",
+        body: { kind: mode, user_category, user_note: $("#note")?.value.trim() || "" },
+      });
+      state.notice = `«${res.description}»: ${user_category} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`;
+      state.reviewId = null;
+      await loadReview();
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не удалось отнести по описанию";
     }
   });
   $("#leave-unlabeled")?.addEventListener("click", async () => {

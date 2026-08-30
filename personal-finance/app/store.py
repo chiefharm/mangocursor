@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS mcc_map (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS desc_map (
+    desc_key TEXT PRIMARY KEY,
+    user_category TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'expense',
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_categories (
     name TEXT PRIMARY KEY,
     kind TEXT NOT NULL DEFAULT 'expense',
@@ -219,13 +226,13 @@ def _mcc_key(raw: str | None) -> str:
     return digits
 
 
+def _desc_key(raw: str | None) -> str:
+    return re.sub(r"\s+", " ", str(raw or "")).strip().casefold()
+
+
 def _load_mcc_map(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     rows = conn.execute("SELECT * FROM mcc_map").fetchall()
     return {_mcc_key(r["mcc"]): r for r in rows if _mcc_key(r["mcc"])}
-
-
-def _tx_has_mcc_rule(mcc: str | None, mcc_map: dict[str, sqlite3.Row]) -> bool:
-    return _mcc_key(mcc) in mcc_map
 
 
 def _apply_mcc_rule(
@@ -248,12 +255,44 @@ def _apply_mcc_rule(
     return True
 
 
+def _load_desc_map(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    rows = conn.execute("SELECT * FROM desc_map").fetchall()
+    return {str(r["desc_key"]): r for r in rows if r["desc_key"]}
+
+
+def _apply_desc_rule(
+    conn: sqlite3.Connection,
+    tx_id: int,
+    description: str | None,
+    amount: float,
+    desc_map: dict[str, sqlite3.Row],
+) -> bool:
+    rule = desc_map.get(_desc_key(description))
+    if not rule:
+        return False
+    kind = (rule["kind"] or "expense").strip()
+    if kind == "income" and float(amount) <= 0:
+        return False
+    if kind == "expense" and float(amount) >= 0:
+        return False
+    conn.execute(
+        """
+        UPDATE transactions
+        SET user_category = ?, kind = ?, needs_review = 0
+        WHERE id = ? AND is_internal = 0
+        """,
+        (rule["user_category"], kind, tx_id),
+    )
+    return True
+
+
 def _refresh_existing(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
     tx: ParsedTx,
     uid: str,
     mcc_map: dict[str, sqlite3.Row] | None = None,
+    desc_map: dict[str, sqlite3.Row] | None = None,
 ) -> None:
     locked = bool((row["user_category"] or "").strip())
     extra_json = json.dumps(tx.extra or {}, ensure_ascii=False)
@@ -288,6 +327,13 @@ def _refresh_existing(
     )
     if not locked and not internal:
         _apply_mcc_rule(conn, int(row["id"]), tx.mcc or row["mcc"], mcc_map or {})
+        _apply_desc_rule(
+            conn,
+            int(row["id"]),
+            description,
+            tx.amount,
+            desc_map or {},
+        )
 
 
 def _money_close(a: float | None, b: float | None) -> bool:
@@ -437,11 +483,14 @@ class FinanceStore:
             )
             import_id = int(cur.lastrowid)
             mcc_map = _load_mcc_map(conn)
+            desc_map = _load_desc_map(conn)
             for tx in txs:
                 uid = tx_uid(tx)
                 existing = _lookup_existing(conn, tx)
                 if existing:
-                    _refresh_existing(conn, existing, tx, uid, mcc_map=mcc_map)
+                    _refresh_existing(
+                        conn, existing, tx, uid, mcc_map=mcc_map, desc_map=desc_map
+                    )
                     dup_count += 1
                     refreshed_count += 1
                     continue
@@ -482,8 +531,14 @@ class FinanceStore:
                 )
                 new_ids.append(int(cur.lastrowid))
                 if not is_internal:
-                    _apply_mcc_rule(conn, int(cur.lastrowid), tx.mcc, mcc_map)
-                    if _tx_has_mcc_rule(tx.mcc, mcc_map):
+                    applied = _apply_mcc_rule(conn, int(cur.lastrowid), tx.mcc, mcc_map)
+                    applied = (
+                        _apply_desc_rule(
+                            conn, int(cur.lastrowid), tx.description, tx.amount, desc_map
+                        )
+                        or applied
+                    )
+                    if applied:
                         needs = 0
                 new_count += 1
                 if needs:
@@ -702,6 +757,10 @@ class FinanceStore:
                 "UPDATE mcc_map SET user_category = ? WHERE user_category = ?",
                 (new, old),
             )
+            conn.execute(
+                "UPDATE desc_map SET user_category = ? WHERE user_category = ?",
+                (new, old),
+            )
         return {"old_name": old, "new_name": new, "count": renamed}
 
     def apply_mcc(
@@ -749,6 +808,75 @@ class FinanceStore:
             count = int(cur.rowcount)
         return {
             "mcc": mcc,
+            "user_category": user_category.strip(),
+            "kind": chosen,
+            "count": count,
+            "transaction": public_tx(self.get_transaction(tx_id) or updated),
+        }
+
+    def apply_description(
+        self,
+        tx_id: int,
+        *,
+        user_category: str,
+        kind: str | None = None,
+    ) -> dict[str, Any]:
+        row = self.get_transaction(tx_id)
+        if row is None:
+            raise KeyError(tx_id)
+        key = _desc_key(str(row.get("description") or ""))
+        if not key:
+            raise ValueError("У этой операции нет описания — отнести по тексту нельзя")
+        chosen = (kind or "").strip()
+        if chosen == "transfer":
+            raise ValueError("По описанию можно отнести только расход или доход")
+        updated = self.recategorize(tx_id, user_category=user_category, kind=kind)
+        chosen = (updated.get("kind") or "expense").strip()
+        if chosen not in {"income", "expense"}:
+            chosen = "expense" if float(row.get("amount") or 0) < 0 else "income"
+        self.ensure_user_category(user_category, chosen)
+        now = datetime.now().isoformat(timespec="seconds")
+        amount = float(row.get("amount") or 0)
+        want_outflow = amount < 0
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO desc_map (desc_key, user_category, kind, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(desc_key) DO UPDATE SET
+                    user_category = excluded.user_category,
+                    kind = excluded.kind,
+                    updated_at = excluded.updated_at
+                """,
+                (key, user_category.strip(), chosen, now),
+            )
+            peers = conn.execute(
+                """
+                SELECT id, description, amount
+                FROM transactions
+                WHERE is_internal = 0
+                """
+            ).fetchall()
+            ids = [
+                int(peer["id"])
+                for peer in peers
+                if _desc_key(peer["description"]) == key
+                and (float(peer["amount"] or 0) < 0) == want_outflow
+            ]
+            count = 0
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                cur = conn.execute(
+                    f"""
+                    UPDATE transactions
+                    SET user_category = ?, kind = ?, needs_review = 0, is_internal = 0
+                    WHERE id IN ({placeholders})
+                    """,
+                    [user_category.strip(), chosen, *ids],
+                )
+                count = int(cur.rowcount)
+        return {
+            "description": str(row.get("description") or "").strip(),
             "user_category": user_category.strip(),
             "kind": chosen,
             "count": count,

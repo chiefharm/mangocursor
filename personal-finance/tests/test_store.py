@@ -204,6 +204,58 @@ def test_apply_mcc_without_code_fails(tmp_path: Path) -> None:
         raise AssertionError("expected ValueError")
 
 
+SAME_DESC = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+15.08.2026 10:00:00;15.08.2026;*1111;OK;-1250,50;RUB;-1250,50;RUB;;Супермаркеты;5411;PYATEROCHKA
+16.08.2026 12:00:00;16.08.2026;*1111;OK;-400,00;RUB;-400,00;RUB;;Супермаркеты;;pyaterochka
+18.08.2026 09:00:00;18.08.2026;*1111;OK;-890,00;RUB;-890,00;RUB;;Кафе и рестораны;5812;COFFEE
+19.08.2026 09:00:00;19.08.2026;*1111;OK;200,00;RUB;200,00;RUB;;Пополнения;;PYATEROCHKA
+"""
+
+
+def test_apply_description_updates_all_with_text_and_new_imports(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(SAME_DESC)), "desc.csv")
+    food = store.list_ledger(
+        "2026-08-01", "2026-08-31", bucket="expense", category="Супермаркеты"
+    )
+    pyaterochka = next(row for row in food if row["description"] == "PYATEROCHKA")
+    result = store.apply_description(
+        int(pyaterochka["id"]), user_category="Пятёрочка", kind="expense"
+    )
+    assert result["count"] == 2
+    summary = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Пятёрочка"] == 1650.5
+    assert names["Кафе и рестораны"] == 890
+    income = {c["name"] for c in summary["income_by_category"]}
+    assert "Пятёрочка" not in income
+    extra = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+21.08.2026 10:00:00;21.08.2026;*1111;OK;-100,00;RUB;-100,00;RUB;;Супермаркеты;;PYATEROCHKA
+"""
+    store.import_transactions(parse_statement(_write(extra)), "more.csv")
+    again = store.summary("2026-08-01", "2026-08-31")
+    names = {c["name"]: c["amount"] for c in again["expense_by_category"]}
+    assert names["Пятёрочка"] == 1750.5
+
+
+def test_apply_description_without_text_fails(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    blank = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+15.08.2026 10:00:00;15.08.2026;*1111;OK;-100,00;RUB;-100,00;RUB;;Супермаркеты;5411;
+"""
+    store.import_transactions(parse_statement(_write(blank)), "blank.csv")
+    row = store.list_ledger("2026-08-01", "2026-08-31", bucket="expense")[0]
+    try:
+        store.apply_description(int(row["id"]), user_category="Еда")
+    except ValueError as exc:
+        assert "описания" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 POSTED_TSUM = """
 Выписка по счету
 Операции по счету

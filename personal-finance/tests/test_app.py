@@ -216,13 +216,55 @@ def test_rename_and_apply_mcc_via_api(client: TestClient) -> None:
     assert "Кофе с собой" in chips
 
 
+def test_apply_description_via_api(client: TestClient) -> None:
+    csv = (
+        "Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;"
+        "Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание\n"
+        "15.08.2026 10:00:00;15.08.2026;*1111;OK;-1250,50;RUB;-1250,50;RUB;;Супермаркеты;5411;PYATEROCHKA\n"
+        "16.08.2026 12:00:00;16.08.2026;*1111;OK;-400,00;RUB;-400,00;RUB;;Супермаркеты;;pyaterochka\n"
+        "18.08.2026 09:00:00;18.08.2026;*1111;OK;-890,00;RUB;-890,00;RUB;;Кафе и рестораны;5812;COFFEE\n"
+        "19.08.2026 09:00:00;19.08.2026;*1111;OK;200,00;RUB;200,00;RUB;;Пополнения;;PYATEROCHKA\n"
+    )
+    res = client.post("/api/import", files={"file": ("ops.csv", csv.encode("utf-8"), "text/csv")})
+    assert res.status_code == 200, res.text
+    food = client.get(
+        "/api/transactions",
+        params={"year": 2026, "month": 8, "bucket": "expense", "category": "Супермаркеты"},
+    ).json()["transactions"]
+    pyaterochka = next(row for row in food if row["description"] == "PYATEROCHKA")
+    applied = client.post(
+        f"/api/transactions/{pyaterochka['id']}/apply-description",
+        json={"user_category": "Пятёрочка", "kind": "expense"},
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["count"] == 2
+    summary = client.get("/api/summary?year=2026&month=8").json()["summary"]
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Пятёрочка"] == 1650.5
+    assert names["Кафе и рестораны"] == 890
+    income = {c["name"] for c in summary["income_by_category"]}
+    assert "Пятёрочка" not in income
+    extra = (
+        "Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;"
+        "Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание\n"
+        "21.08.2026 10:00:00;21.08.2026;*1111;OK;-100,00;RUB;-100,00;RUB;;Супермаркеты;;PYATEROCHKA\n"
+    )
+    again = client.post("/api/import", files={"file": ("more.csv", extra.encode("utf-8"), "text/csv")})
+    assert again.status_code == 200, again.text
+    summary = client.get("/api/summary?year=2026&month=8").json()["summary"]
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Пятёрочка"] == 1750.5
+
+
 def test_review_later_buttons_are_tappable(client: TestClient) -> None:
     page = client.get("/").text
-    assert "static/app.js?v=17" in page
-    assert "static/styles.css?v=17" in page
+    assert "static/app.js?v=18" in page
+    assert "static/styles.css?v=18" in page
     js = client.get("/static/app.js").text
     assert 'id="review-later" data-nav="queue"' in js
     assert 'id="tab-queue" data-nav="queue"' in js
+    assert 'id="apply-desc"' in js
+    assert "apply-description" in js
     assert "function bindAppClicks()" in js
     assert "state.view = \"queue\";\n  state.reviewId = null;\n  render();" in js
     css = client.get("/static/styles.css").text
