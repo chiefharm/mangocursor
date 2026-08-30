@@ -216,4 +216,21 @@ def test_rename_and_apply_mcc_via_api(client: TestClient) -> None:
     assert "Кофе с собой" in chips
 
 
+def test_review_later_buttons_are_tappable(client: TestClient) -> None:
+    page = client.get("/").text
+    assert "static/app.js?v=17" in page
+    assert "static/styles.css?v=17" in page
+    js = client.get("/static/app.js").text
+    assert 'id="review-later" data-nav="queue"' in js
+    assert 'id="tab-queue" data-nav="queue"' in js
+    assert "function bindAppClicks()" in js
+    assert "state.view = \"queue\";\n  state.reviewId = null;\n  render();" in js
+    css = client.get("/static/styles.css").text
+    tabbar = css.split(".tabbar {", 1)[1].split(".tab {", 1)[0]
+    assert "translateX(-50%)" not in tabbar
+    assert "left: 0;" in tabbar
+    assert "right: 0;" in tabbar
+    assert "z-index: 40;" in tabbar
+
+
 

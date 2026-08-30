@@ -129,7 +129,7 @@ function homeView() {
       ${reviewN ? `
         <div class="banner">
           <p><b>${reviewN}</b> ${plural(reviewN, "перевод", "перевода", "переводов")} без статьи — поясните, куда ушли деньги.</p>
-          <button class="primary" id="go-review">Разобрать</button>
+          <button type="button" class="primary" id="go-review" data-nav="queue">Разобрать</button>
         </div>` : ""}
       <section class="hero">
         <div class="label">Сальдо счёта</div>
@@ -206,7 +206,7 @@ function reviewView() {
     <div class="app-shell">
       <div class="topbar">
         <div class="brand">Осталось ${left}</div>
-        <button class="ghost" id="review-later">Разобрать позже</button>
+        <button type="button" class="ghost" id="review-later" data-nav="queue">Разобрать позже</button>
       </div>
       <section class="hero">
         <div class="label">${fmtDate(current.posted_date)}</div>
@@ -269,8 +269,8 @@ function tabBar() {
   const onHome = state.view === "home" || state.view === "ops" || state.view === "edit-op";
   return `
     <nav class="tabbar">
-      <button type="button" class="tab ${onHome ? "on" : ""}" id="tab-home">Сводка</button>
-      <button type="button" class="tab ${onQueue ? "on" : ""} ${n ? "hot" : ""}" id="tab-queue">
+      <button type="button" class="tab ${onHome ? "on" : ""}" id="tab-home" data-nav="home">Сводка</button>
+      <button type="button" class="tab ${onQueue ? "on" : ""} ${n ? "hot" : ""}" id="tab-queue" data-nav="queue">
         Разобрать позже
         ${n ? `<span class="tab-badge">${n > 99 ? "99+" : n}</span>` : ""}
       </button>
@@ -521,8 +521,6 @@ function bindLogin() {
 function bindHome() {
   $("#prev-month")?.addEventListener("click", () => shiftMonth(-1));
   $("#next-month")?.addEventListener("click", () => shiftMonth(1));
-  $("#go-review")?.addEventListener("click", () => showQueue());
-  bindTabs();
   $("#logout-btn")?.addEventListener("click", async () => { await api("/api/logout", { method: "POST" }); state.me.authed = false; render(); });
   $("#notify-btn")?.addEventListener("click", async () => {
     try {
@@ -569,7 +567,6 @@ function bindOpsHits() {
 }
 
 function bindOps() {
-  bindTabs();
   $("#ops-back")?.addEventListener("click", () => {
     state.view = "home";
     state.ops = null;
@@ -637,7 +634,6 @@ async function openEditOp(id) {
 }
 
 function bindEditOp() {
-  bindTabs();
   $("#edit-back")?.addEventListener("click", () => {
     state.editOp = null;
     if (state.editFrom === "ops" && state.ops) {
@@ -809,20 +805,35 @@ async function showOps(bucket, category) {
   render();
 }
 
-function bindTabs() {
-  $("#tab-home")?.addEventListener("click", () => {
-    state.view = "home";
-    state.reviewId = null;
-    loadSummary();
-  });
-  $("#tab-queue")?.addEventListener("click", () => showQueue());
+function goHome() {
+  state.view = "home";
+  state.reviewId = null;
+  render();
+  loadSummary();
 }
 
 async function showQueue() {
   state.view = "queue";
   state.reviewId = null;
-  state.review = await api("/api/review");
-  await loadSummary();
+  render();
+  try {
+    await fetchSummary();
+  } catch (err) {
+    state.notice = err.data?.detail || err.message || "Не удалось открыть очередь";
+  }
+  if (state.view === "queue") render();
+}
+
+function bindAppClicks() {
+  if (app.dataset.navBound) return;
+  app.dataset.navBound = "1";
+  app.addEventListener("click", (e) => {
+    const nav = e.target.closest("[data-nav]");
+    if (!nav) return;
+    e.preventDefault();
+    if (nav.getAttribute("data-nav") === "home") goHome();
+    else if (nav.getAttribute("data-nav") === "queue") showQueue();
+  });
 }
 
 async function acceptAllIncome() {
@@ -850,7 +861,6 @@ function bindAcceptIncome() {
 }
 
 function bindQueue() {
-  bindTabs();
   document.querySelectorAll("[data-open]").forEach((el) => {
     el.addEventListener("click", () => {
       state.reviewId = el.getAttribute("data-open");
@@ -877,11 +887,6 @@ function bindQueue() {
 }
 
 function bindReview() {
-  bindTabs();
-  $("#review-later")?.addEventListener("click", () => {
-    state.reviewId = null;
-    showQueue();
-  });
   bindAcceptIncome();
   const card = $("#review-card");
   if (!card) return;
@@ -1046,18 +1051,33 @@ async function upload(file) {
   }
 }
 
-async function loadSummary() {
+async function fetchSummary() {
   const [summary, review] = await Promise.all([
     api(`/api/summary?year=${state.year}&month=${state.month}`),
     api("/api/review"),
   ]);
   state.summary = summary;
   state.review = review;
+}
+
+async function loadSummary() {
+  try {
+    await fetchSummary();
+  } catch (err) {
+    state.notice = err.data?.detail || err.message || "Не удалось загрузить сводку";
+  }
   render();
 }
 
 async function loadReview() {
-  state.review = await api("/api/review");
+  try {
+    state.review = await api("/api/review");
+  } catch (err) {
+    state.notice = err.data?.detail || err.message || "Не удалось загрузить очередь";
+    state.view = "queue";
+    render();
+    return;
+  }
   if (!state.review.count) {
     state.view = "queue";
     await loadSummary();
@@ -1120,6 +1140,7 @@ function esc(s) {
     .replaceAll('"', "&quot;");
 }
 
+bindAppClicks();
 boot().catch((err) => {
   app.innerHTML = `<div class="app-shell"><p class="error">${esc(err.message)}</p></div>`;
 });

@@ -42,6 +42,7 @@ h1, h2, .serif {
 button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:active { transform: translateY(1px); }
+.tabbar button:active, .tab:active { transform: none; }
 
 .app-shell {
   max-width: 640px;
@@ -521,16 +522,20 @@ button.tx-row { cursor: pointer; }
 
 .tabbar {
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
   bottom: 0;
-  width: min(640px, 100%);
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   padding: 10px 16px calc(10px + var(--safe-bottom));
   background: linear-gradient(180deg, transparent, var(--bg) 30%);
-  z-index: 5;
+  z-index: 40;
+  pointer-events: auto;
+  isolation: isolate;
 }
 .tab {
   display: inline-flex;
@@ -542,6 +547,11 @@ button.tx-row { cursor: pointer; }
   border: 1px solid var(--line);
   background: var(--paper);
   font-weight: 600;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
 }
 .tab.on { background: var(--accent); color: #f7f1e6; border-color: var(--accent); }
 .tab.hot:not(.on) {
