@@ -7,8 +7,9 @@ from app.parse_pdf import parse_pdf_text
 ALFA = """
 Выписка по счету
 За период с 01.08.2026 по 28.08.2026
-Поступления 10 000,00 RUR
-Расходы 1 500,00 RUR
+Поступления 25 000,00 RUR
+Расходы 34 759,00 RUR
+Неподтвержденные операции 28 550,00 RUR
 Операции по счету
 Дата проводки Код операции Описание Сумма
 в валюте счета
@@ -36,7 +37,7 @@ HOLD Неподтвержденная операция: 1EE4HB TSUM ONLINE 25.08
 """
 
 
-def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
+def test_alfa_pdf_uses_posting_dates_and_keeps_holds() -> None:
     txs = parse_pdf_text(ALFA, filename="random-name.pdf")
     assert [t.posted_date.isoformat() for t in txs] == [
         "2026-08-01",
@@ -44,8 +45,8 @@ def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
         "2026-08-01",
         "2026-08-04",
         "2026-08-07",
+        "2026-08-25",
     ]
-    assert all(abs(t.amount) != 28550 for t in txs)
 
     piggy = next(t for t in txs if t.amount == -150)
     assert piggy.suggested_internal is True
@@ -67,3 +68,37 @@ def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
     assert ip.suggested_kind == "income"
     assert ip.category == "ИП"
     assert ip.needs_review is False
+
+    tsum = next(t for t in txs if abs(t.amount) == 28550)
+    assert tsum.amount == -28550
+    assert tsum.posted_date.isoformat() == "2026-08-25"
+    assert tsum.category == "Одежда"
+    assert tsum.description == "ЦУМ"
+    assert tsum.status == "hold"
+    assert tsum.extra.get("hold") is True
+    assert tsum.needs_review is False
+    assert tsum.suggested_kind == "expense"
+
+
+def test_alfa_header_totals_and_hold_merchant() -> None:
+    from app.parse_pdf import extract_pdf_meta
+
+    meta = extract_pdf_meta(ALFA)
+    assert meta.from_header is True
+    assert meta.period_from == "2026-08-01"
+    assert meta.period_to == "2026-08-28"
+    assert meta.income == 25000
+    assert meta.expense == 34759
+    assert meta.unconfirmed == 28550
+
+    hold_line = (
+        "HOLD Неподтвержденная операция: 36A4FF 30653271 RU SBER 5411 SAMOKAT>SANKT "
+        "27.08.26 1043.00 RUR 220015++++++2987, дата операции: 27.08.2026\n"
+        "-1 043,00 RUR\n"
+    )
+    txs = parse_pdf_text(ALFA + hold_line, filename="hold.pdf")
+    samokat = next(t for t in txs if abs(t.amount) == 1043)
+    assert samokat.description == "Самокат"
+    assert samokat.category == "Супермаркеты"
+    assert samokat.card == "*2987"
+    assert samokat.status == "hold"

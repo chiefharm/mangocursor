@@ -8,8 +8,12 @@ const state = {
   month: new Date().getMonth() + 1,
   summary: null,
   review: null,
+  reviewId: null,
   view: "home",
   notice: "",
+  ops: null,
+  editOp: null,
+  editFrom: "ops",
 };
 
 const money = (n, signed = false) => {
@@ -56,6 +60,21 @@ function render() {
     bindReview();
     return;
   }
+  if (state.view === "queue") {
+    app.innerHTML = queueView();
+    bindQueue();
+    return;
+  }
+  if (state.view === "ops") {
+    app.innerHTML = opsView();
+    bindOps();
+    return;
+  }
+  if (state.view === "edit-op") {
+    app.innerHTML = editOpView();
+    bindEditOp();
+    return;
+  }
   app.innerHTML = homeView();
   bindHome();
 }
@@ -83,7 +102,9 @@ function homeView() {
   const maxInc = Math.max(1, ...(s?.income_by_category || []).map((c) => c.amount));
   const delta = prev && prev.tx_count
     ? `К прошлому месяцу: доходы ${cmp(s.income, prev.income)}, расходы ${cmp(s.expense, prev.expense)}`
-    : "Загрузите выписку — посчитаю доходы, расходы и статьи банка.";
+    : (s && s.tx_count
+      ? "Все поступления минус все списания по выписке — как изменился остаток счёта."
+      : "Загрузите выписку — посчитаю, как изменился остаток.");
   const showLogout = Boolean(state.me.auth_required);
   return `
     <div class="app-shell">
@@ -108,17 +129,24 @@ function homeView() {
       ${reviewN ? `
         <div class="banner">
           <p><b>${reviewN}</b> ${plural(reviewN, "перевод", "перевода", "переводов")} без статьи — поясните, куда ушли деньги.</p>
-          <button class="primary" id="go-review">Разобрать</button>
+          <button type="button" class="primary" id="go-review" data-nav="queue">Разобрать</button>
         </div>` : ""}
       <section class="hero">
-        <div class="label">Сальдо за месяц</div>
+        <div class="label">Сальдо счёта</div>
         <p class="net serif ${net >= 0 ? "pos" : "neg"}">${s ? money(net, true) : "—"}</p>
         ${renderGoalMeter(s)}
         <div class="split">
-          <div class="kpi in"><div class="k">Доходы</div><div class="v">${s ? money(s.income) : "—"}</div></div>
-          <div class="kpi out"><div class="k">Расходы</div><div class="v">${s ? money(s.expense) : "—"}</div></div>
+          <button type="button" class="kpi in" data-ops="income"${s && s.income ? "" : " disabled"}>
+            <div class="k">Доходы</div>
+            <div class="v">${s ? money(s.income) : "—"}</div>
+          </button>
+          <button type="button" class="kpi out" data-ops="expense"${s && s.expense ? "" : " disabled"}>
+            <div class="k">Расходы</div>
+            <div class="v">${s ? money(s.expense) : "—"}</div>
+          </button>
         </div>
         <div class="delta">${esc(delta)}</div>
+        ${renderReconcile(s)}
         ${s && s.unreviewed_count ? `<div class="delta">Не разнесено: ${money(Math.abs(s.unreviewed_sum))} (${s.unreviewed_count})</div>` : ""}
       </section>
       <section class="card">
@@ -142,47 +170,44 @@ function homeView() {
         <div class="error" id="upload-error" hidden></div>
       </section>
       <section class="card">
-        <div class="card-head">
+        <button type="button" class="card-head hit" data-ops="expense"${s && s.expense ? "" : " disabled"}>
           <h2>Расходы</h2>
-          <span class="muted">${s ? money(s.expense) : ""}</span>
-        </div>
-        ${renderBars(s?.expense_by_category, maxExp, "out", s?.expense) || `<p class="empty">Пока пусто</p>`}
+          <span class="muted">${s ? money(s.expense) : ""} ›</span>
+        </button>
+        ${renderBars(s?.expense_by_category, maxExp, "expense", s?.expense) || `<p class="empty">Пока пусто</p>`}
         ${renderSpikes()}
       </section>
       <section class="card">
-        <div class="card-head">
+        <button type="button" class="card-head hit" data-ops="income"${s && s.income ? "" : " disabled"}>
           <h2>Доходы</h2>
-          <span class="muted">${s ? money(s.income) : ""}</span>
-        </div>
-        ${renderBars(s?.income_by_category, maxInc, "in", s?.income) || `<p class="empty">Пока пусто</p>`}
+          <span class="muted">${s ? money(s.income) : ""} ›</span>
+        </button>
+        ${renderBars(s?.income_by_category, maxInc, "income", s?.income) || `<p class="empty">Пока пусто</p>`}
       </section>
+      ${unlabeledCard(s)}
+      ${tabBar()}
     </div>`;
 }
 
 function reviewView() {
   const items = state.review?.transactions || [];
-  const current = items[0];
+  const current = items.find((t) => String(t.id) === String(state.reviewId)) || items[0];
   const left = items.length;
   if (!current) {
     return `
       <div class="app-shell">
-        <div class="topbar"><div class="brand">Касса</div><button class="ghost" id="back-home">К сводке</button></div>
-        <div class="card"><h2>Все переводы разобраны</h2><p>Статьи банка и ваши пояснения уже в сводке.</p></div>
+        <div class="topbar"><div class="brand">Касса</div></div>
+        <div class="card"><h2>Все переводы разобраны</h2><p>Статьи банка и ваши пояснения уже в сводке. Неразмеченные — в разделе «Переводы без разметки».</p></div>
+        ${tabBar()}
       </div>`;
   }
   const amtClass = current.amount < 0 ? "neg" : "pos";
-  const total = Math.max(left, state.me.review_count || left);
-  const done = Math.max(0, total - left);
-  const dots = Array.from({ length: Math.min(total, 8) }, (_, i) =>
-    `<span class="${i < done ? "on" : ""}"></span>`
-  ).join("");
   return `
     <div class="app-shell">
       <div class="topbar">
         <div class="brand">Осталось ${left}</div>
-        <button class="ghost" id="back-home">К сводке</button>
+        <button type="button" class="ghost" id="review-later" data-nav="queue">Разобрать позже</button>
       </div>
-      <div class="progress-dots">${dots}</div>
       <section class="hero">
         <div class="label">${fmtDate(current.posted_date)}</div>
         <p class="net serif ${amtClass}">${money(current.amount, true)}</p>
@@ -202,9 +227,205 @@ function reviewView() {
           <input class="text-input" id="custom-cat" placeholder="Своя статья" />
         </div>
         <button class="primary" id="save-review" style="width:100%;margin-top:14px">Сохранить</button>
+        ${(current.description || "").trim() ? `<button type="button" class="ghost" id="apply-desc" style="width:100%;margin-top:8px">Добавить в статью все с таким описанием</button>` : ""}
+        <button class="ghost" id="leave-unlabeled" style="width:100%;margin-top:8px">Оставить неразмеченным</button>
+        ${pendingIncome(items).length ? `<button class="primary income-all" id="accept-income-all" style="width:100%;margin-top:8px">Зачислить все доходы</button>` : ""}
         <div class="error" id="review-error" hidden></div>
       </section>
+      ${tabBar()}
     </div>`;
+}
+
+function queueView() {
+  const pending = state.review?.transactions || [];
+  const inflows = pendingIncome(pending);
+  const inflowSum = inflows.reduce((acc, t) => acc + Number(t.amount || 0), 0);
+  const s = state.summary?.summary;
+  return `
+    <div class="app-shell">
+      <div class="topbar">
+        <div class="brand">Касса</div>
+      </div>
+      <h1 class="queue-title serif">Разобрать позже</h1>
+      <p class="hint">${pending.length
+        ? "Все неразобранные переводы здесь. Откройте любой или оставьте без статьи."
+        : "Очереди нет. Неразмеченные за месяц — ниже, если они есть."}</p>
+      ${pending.length ? `
+        <div class="queue-actions">
+          ${inflows.length ? `<button class="primary income-all" id="accept-income-all">Зачислить все доходы</button>
+          <p class="hint">${inflows.length} ${plural(inflows.length, "поступление", "поступления", "поступлений")} · ${money(inflowSum, true)}</p>` : ""}
+          <button class="ghost" id="unlabel-all">Оставить все неразмеченными</button>
+        </div>
+        <section class="card">
+          ${pending.map((t) => txRow(t, "open-review")).join("")}
+        </section>` : `<p class="empty">Пока нечего разбирать позже</p>`}
+      ${unlabeledCard(s)}
+      ${tabBar()}
+    </div>`;
+}
+
+function tabBar() {
+  const n = Number(state.review?.count ?? state.summary?.summary?.unreviewed_count ?? 0);
+  const onQueue = state.view === "queue" || state.view === "review";
+  const onHome = state.view === "home" || state.view === "ops" || state.view === "edit-op";
+  return `
+    <nav class="tabbar">
+      <button type="button" class="tab ${onHome ? "on" : ""}" id="tab-home" data-nav="home">Сводка</button>
+      <button type="button" class="tab ${onQueue ? "on" : ""} ${n ? "hot" : ""}" id="tab-queue" data-nav="queue">
+        Разобрать позже
+        ${n ? `<span class="tab-badge">${n > 99 ? "99+" : n}</span>` : ""}
+      </button>
+    </nav>`;
+}
+
+function pendingIncome(items) {
+  return (items || []).filter((t) => Number(t.amount) > 0);
+}
+
+function unlabeledCard(s) {
+  const rows = s?.unlabeled || [];
+  if (!rows.length) return "";
+  return `
+    <section class="card unlabeled-card">
+      <div class="card-head">
+        <h2>Переводы без разметки</h2>
+        <span class="muted">${money(Math.abs(s.unlabeled_sum || 0))}</span>
+      </div>
+      <p class="hint">Оставили без статьи. В сальдо входят, в обычные категории — нет. Нажмите — можно задать статью.</p>
+      ${rows.map((t) => txRow(t, "edit")).join("")}
+    </section>`;
+}
+
+function uniqueDescSeeds(rows) {
+  const seen = new Map();
+  for (const t of rows || []) {
+    const key = String(t.description || "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (!key || seen.has(key)) continue;
+    seen.set(key, t);
+  }
+  return [...seen.values()];
+}
+
+function shortDesc(text, n = 42) {
+  const d = String(text || "").trim();
+  return d.length > n ? `${d.slice(0, n)}…` : d;
+}
+
+function opsView() {
+  const ops = state.ops || {};
+  const rows = ops.transactions || [];
+  const title = ops.title || "Операции";
+  const showCat = !ops.category;
+  const seeds = uniqueDescSeeds(rows);
+  return `
+    <div class="app-shell">
+      <div class="topbar">
+        <button class="ghost" id="ops-back">Назад</button>
+        <div class="brand">Касса</div>
+      </div>
+      <h1 class="queue-title serif">${esc(title)}</h1>
+      <p class="hint">${ops.loading
+        ? "Загрузка…"
+        : `${rows.length} ${plural(rows.length, "операция", "операции", "операций")} · ${money(ops.sum || 0)}. Нажмите строку — можно сменить статью.`}</p>
+      ${ops.category && !ops.loading ? `
+        <section class="card">
+          <h2>Переименовать статью</h2>
+          <p class="hint">Новое имя сразу для всех операций в «${esc(ops.category)}».</p>
+          <input class="text-input" id="rename-cat" placeholder="Новое название" value="${esc(ops.category)}" />
+          <button class="primary" id="rename-cat-btn" style="width:100%;margin-top:12px">Сохранить название</button>
+          <div class="error" id="rename-error" hidden></div>
+        </section>` : ""}
+      ${ops.category && !ops.loading && seeds.length ? `
+        <section class="card">
+          <h2>По описанию</h2>
+          <p class="hint">Найти все операции с тем же текстом и поставить статью «${esc(ops.category)}» — даже если сейчас они «между своими».</p>
+          ${seeds.map((t) => `
+            <button type="button" class="ghost" data-apply-desc="${t.id}" style="width:100%;margin-top:8px">
+              Добавить в статью все с таким описанием${seeds.length > 1 ? ` · ${esc(shortDesc(t.description))}` : ""}
+            </button>`).join("")}
+          <div class="error" id="apply-desc-error" hidden></div>
+        </section>` : ""}
+      ${rows.length ? `
+        <section class="card">
+          ${rows.map((t) => txRow(t, "edit", showCat)).join("")}
+        </section>` : (ops.loading ? "" : `<p class="empty">Операций нет</p>`)}
+      ${tabBar()}
+    </div>`;
+}
+
+function editOpView() {
+  const t = state.editOp;
+  if (!t) {
+    return `
+      <div class="app-shell">
+        <div class="topbar"><div class="brand">Касса</div></div>
+        <p class="empty">Операция не найдена</p>
+        ${tabBar()}
+      </div>`;
+  }
+  const amtClass = t.amount < 0 ? "neg" : "pos";
+  const cat = currentCat(t);
+  const mcc = (t.mcc || "").replace(/\D/g, "").slice(-4);
+  const mccLabel = mcc ? `MCC ${mcc}` : "";
+  return `
+    <div class="app-shell">
+      <div class="topbar">
+        <button class="ghost" id="edit-back">Назад</button>
+        <div class="brand">Касса</div>
+      </div>
+      <section class="hero">
+        <div class="label">${esc(fmtDate(t.posted_date))}</div>
+        <p class="net serif ${amtClass}">${money(t.amount, true)}</p>
+        <p class="desc">${esc(t.description || "Без описания")}</p>
+        <p class="sub">${isHold(t) ? "Операция в обработке · " : ""}${cat ? `Сейчас: ${esc(cat)}` : "Статья не задана"}${mccLabel ? ` · ${mccLabel}` : ""}</p>
+      </section>
+      <section class="card" id="edit-card" data-id="${t.id}">
+        <h2>Статья</h2>
+        <p class="hint">Выберите из списка или напишите новое название — так создаётся своя статья.</p>
+        <div class="mode-row">
+          <button type="button" class="ghost" data-mode="expense">Расход</button>
+          <button type="button" class="ghost" data-mode="income">Доход</button>
+        </div>
+        <div class="chips" id="edit-chips"></div>
+        <input class="text-input" id="edit-cat" placeholder="Название статьи" value="${esc(cat)}" />
+        <button class="primary" id="save-cat" style="width:100%;margin-top:14px">Сохранить эту операцию</button>
+        ${(t.description || "").trim() ? `<button type="button" class="ghost" id="apply-desc" style="width:100%;margin-top:8px">Добавить в статью все с таким описанием</button>` : ""}
+        ${mcc ? `<button class="ghost" id="apply-mcc" style="width:100%;margin-top:8px">Отнести все с этим кодом · MCC ${esc(mcc)}</button>` : ""}
+        ${cat && cat !== "Между своими" && cat !== "Не разобрано" ? `<button class="ghost" id="rename-article" style="width:100%;margin-top:8px">Переименовать статью «${esc(cat)}»</button>` : ""}
+        <div class="error" id="edit-error" hidden></div>
+      </section>
+      ${tabBar()}
+    </div>`;
+}
+
+function isHold(t) {
+  return t?.status === "hold" || Boolean(t?.extra?.hold);
+}
+
+function currentCat(t) {
+  return (t?.user_category || t?.bank_category || "").trim();
+}
+
+function txRow(t, action, showCat) {
+  const cls = t.amount < 0 ? "neg" : "pos";
+  const open = action === "open-review" ? ` data-open="${t.id}"`
+    : action === "edit" ? ` data-edit="${t.id}"` : "";
+  const tag = action ? "button" : "div";
+  const type = action ? ` type="button"` : "";
+  const cat = (t.user_category || t.bank_category || "").trim();
+  const sub = [
+    fmtDate(t.posted_date),
+    showCat && cat ? cat : "",
+    isHold(t) ? "в обработке" : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <${tag} class="tx-row"${type}${open}>
+      <div>
+        <div class="tx-desc">${esc(t.description || "Перевод")}</div>
+        <div class="tx-sub">${esc(sub)}</div>
+      </div>
+      <div class="tx-amt ${cls}">${money(t.amount, true)}</div>
+    </${tag}>`;
 }
 
 function renderGoalMeter(s) {
@@ -248,11 +469,11 @@ function renderSpikes() {
   if (spikes.length) {
     html += `<h2 style="margin-top:18px">Сильно выросли</h2>`;
     html += spikes.map((row) => `
-      <div class="ledger-row">
+      <button type="button" class="ledger-row cat-hit" data-ops="expense" data-cat="${esc(row.name)}">
         <span class="name">${esc(row.name)} <span class="spike-tag">выросло</span></span>
         <span class="dots"></span>
         <span class="amt">+${money(row.diff)}</span>
-      </div>`).join("");
+      </button>`).join("");
   }
   if (recs.length) {
     html += `<h2 style="margin-top:18px">К цели</h2>`;
@@ -261,21 +482,41 @@ function renderSpikes() {
   return html;
 }
 
-function renderBars(rows, max, kind, total) {
+function renderReconcile(s) {
+  const rec = s?.reconcile;
+  if (!rec || (rec.stmt_income == null && rec.stmt_expense == null)) return "";
+  const ok = rec.matched && s.bars_ok !== false;
+  const hold = rec.book_holds ? ` · в обработке ${money(rec.book_holds)}` : "";
+  const inc = rec.income_ok
+    ? `доходы ${money(rec.stmt_income)}`
+    : `доходы ${money(rec.book_income)} вместо ${money(rec.stmt_income)}`;
+  const exp = rec.expense_ok
+    ? `расходы ${money(rec.stmt_expense)}`
+    : `расходы ${money(rec.book_expense)} вместо ${money(rec.stmt_expense)}`;
+  const title = ok ? "Сверка с выпиской — совпадает" : "Сверка с выпиской — не сходится";
+  return `
+    <div class="reconcile ${ok ? "ok" : "bad"}">
+      <div class="reconcile-title">${title}</div>
+      <div>${inc} · ${exp}${hold}</div>
+    </div>`;
+}
+
+function renderBars(rows, max, bucket, total) {
   if (!rows || !rows.length) return "";
   const sum = total || rows.reduce((a, r) => a + r.amount, 0) || 1;
+  const fill = bucket === "income" ? "in" : "out";
   return rows.map((row) => {
     const share = Math.round((row.amount / sum) * 100);
     return `
-    <div>
+    <button type="button" class="cat-hit" data-ops="${bucket}" data-cat="${esc(row.name)}">
       <div class="ledger-row">
         <span class="name">${esc(row.name)}</span>
         <span class="dots"></span>
         <span class="share">${share}%</span>
         <span class="amt">${money(row.amount)}</span>
       </div>
-      <div class="track"><div class="fill ${kind}" style="width:${Math.max(6, (row.amount / max) * 100)}%"></div></div>
-    </div>`;
+      <div class="track"><div class="fill ${fill}" style="width:${Math.max(6, (row.amount / max) * 100)}%"></div></div>
+    </button>`;
   }).join("");
 }
 
@@ -308,7 +549,6 @@ function bindLogin() {
 function bindHome() {
   $("#prev-month")?.addEventListener("click", () => shiftMonth(-1));
   $("#next-month")?.addEventListener("click", () => shiftMonth(1));
-  $("#go-review")?.addEventListener("click", () => { state.view = "review"; loadReview(); });
   $("#logout-btn")?.addEventListener("click", async () => { await api("/api/logout", { method: "POST" }); state.me.authed = false; render(); });
   $("#notify-btn")?.addEventListener("click", async () => {
     try {
@@ -341,13 +581,389 @@ function bindHome() {
   });
   file?.addEventListener("change", () => { if (file.files[0]) upload(file.files[0]); });
   $("#pull-drive")?.addEventListener("click", pullDrive);
+  bindOpsHits();
+  bindEditHits();
+}
+
+function bindOpsHits() {
+  document.querySelectorAll("[data-ops]").forEach((el) => {
+    el.addEventListener("click", () => {
+      if (el.disabled) return;
+      showOps(el.getAttribute("data-ops"), el.getAttribute("data-cat") || "");
+    });
+  });
+}
+
+function bindOps() {
+  $("#ops-back")?.addEventListener("click", () => {
+    state.view = "home";
+    state.ops = null;
+    state.editOp = null;
+    render();
+  });
+  bindEditHits();
+  document.querySelectorAll("[data-apply-desc]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const cat = (state.ops?.category || "").trim();
+      const box = $("#apply-desc-error");
+      if (!cat) return;
+      const kind = state.ops?.bucket === "income" ? "income" : "expense";
+      try {
+        const res = await api(`/api/transactions/${btn.getAttribute("data-apply-desc")}/apply-description`, {
+          method: "POST",
+          body: { user_category: cat, kind },
+        });
+        state.notice = `«${shortDesc(res.description, 36)}»: ${cat} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`;
+        await loadSummary();
+        await showOps(state.ops.bucket, cat);
+      } catch (err) {
+        if (box) {
+          box.hidden = false;
+          box.textContent = err.data?.detail || err.message || "Не удалось отнести по описанию";
+        }
+      }
+    });
+  });
+  $("#rename-cat-btn")?.addEventListener("click", async () => {
+    const oldName = state.ops?.category || "";
+    const newName = ($("#rename-cat")?.value || "").trim();
+    const box = $("#rename-error");
+    if (!newName) {
+      if (box) { box.hidden = false; box.textContent = "Напишите новое название"; }
+      return;
+    }
+    try {
+      const res = await api("/api/categories/rename", {
+        method: "POST",
+        body: { old_name: oldName, new_name: newName, kind: state.ops?.bucket },
+      });
+      state.notice = `Статья «${oldName}» → «${newName}» · ${res.count || 0} ${plural(res.count || 0, "операция", "операции", "операций")}`;
+      await loadSummary();
+      await showOps(state.ops.bucket, newName);
+    } catch (err) {
+      if (box) {
+        box.hidden = false;
+        box.textContent = err.data?.detail || err.message || "Не переименовалось";
+      }
+    }
+  });
+}
+
+function bindEditHits() {
+  document.querySelectorAll("[data-edit]").forEach((el) => {
+    el.addEventListener("click", () => openEditOp(el.getAttribute("data-edit")));
+  });
+}
+
+function opKind(t) {
+  if (t?.kind === "income") return "income";
+  if (t?.kind === "expense") return "expense";
+  return Number(t?.amount) > 0 ? "income" : "expense";
+}
+
+async function openEditOp(id) {
+  const fromOps = (state.ops?.transactions || []).find((t) => String(t.id) === String(id));
+  const fromUnlabeled = (state.summary?.summary?.unlabeled || []).find((t) => String(t.id) === String(id));
+  let tx = fromOps || fromUnlabeled;
+  state.editFrom = (fromOps || state.view === "ops") ? "ops"
+    : (state.view === "queue" ? "queue" : "home");
+  try {
+    if (!tx) {
+      const res = await api(`/api/transactions/${id}`);
+      tx = res.transaction;
+    }
+    if (!state.review?.categories) {
+      state.review = await api("/api/review");
+    }
+    state.editOp = tx;
+    state.view = "edit-op";
+    render();
+  } catch (err) {
+    alert(err.data?.detail || err.message || "Не удалось открыть операцию");
+  }
+}
+
+function bindEditOp() {
+  $("#edit-back")?.addEventListener("click", () => {
+    state.editOp = null;
+    if (state.editFrom === "ops" && state.ops) {
+      state.view = "ops";
+      render();
+      return;
+    }
+    if (state.editFrom === "queue") {
+      state.view = "queue";
+      render();
+      return;
+    }
+    state.view = "home";
+    render();
+  });
+  const t = state.editOp;
+  if (!t) return;
+  const cats = state.review?.categories || { expense: [], income: [] };
+  const chips = $("#edit-chips");
+  const input = $("#edit-cat");
+  let mode = opKind(t);
+  let chosen = currentCat(t);
+
+  const paintChips = () => {
+    const list = [...new Set([
+      ...(mode === "income" ? cats.income : cats.expense),
+      chosen,
+    ].filter((name) => name && name !== "Переводы без разметки" && name !== "Не разобрано"))];
+    chips.innerHTML = list.map((name) =>
+      `<button type="button" class="chip ${chosen === name ? "on" : ""}" data-cat="${esc(name)}">${esc(name)}</button>`
+    ).join("");
+    chips.querySelectorAll(".chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        chosen = btn.dataset.cat;
+        input.value = chosen;
+        paintChips();
+      });
+    });
+  };
+
+  const setMode = (next) => {
+    mode = next;
+    document.querySelectorAll("[data-mode]").forEach((b) => {
+      b.className = b.dataset.mode === mode ? "primary" : "ghost";
+    });
+    paintChips();
+  };
+  document.querySelectorAll("[data-mode]").forEach((b) => {
+    b.addEventListener("click", () => setMode(b.dataset.mode));
+  });
+  input.addEventListener("input", () => {
+    chosen = input.value.trim();
+    paintChips();
+  });
+  setMode(mode);
+
+  const afterEditSave = async (notice) => {
+    state.notice = notice;
+    const from = state.editFrom;
+    const ops = state.ops;
+    state.editOp = null;
+    const [summary, review] = await Promise.all([
+      api(`/api/summary?year=${state.year}&month=${state.month}`),
+      api("/api/review"),
+    ]);
+    state.summary = summary;
+    state.review = review;
+    if (from === "ops" && ops) {
+      const nextCat = (input.value || "").trim() || ops.category;
+      await showOps(ops.bucket, nextCat);
+    } else if (from === "queue") {
+      await showQueue();
+    } else {
+      state.view = "home";
+      render();
+    }
+  };
+
+  $("#save-cat").addEventListener("click", async () => {
+    const user_category = input.value.trim() || chosen;
+    const box = $("#edit-error");
+    if (!user_category) {
+      box.hidden = false;
+      box.textContent = "Напишите или выберите статью";
+      return;
+    }
+    try {
+      await api(`/api/transactions/${t.id}/category`, {
+        method: "POST",
+        body: { kind: mode, user_category },
+      });
+      await afterEditSave(`Статья: ${user_category}`);
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не сохранилось";
+    }
+  });
+
+  $("#apply-mcc")?.addEventListener("click", async () => {
+    const user_category = input.value.trim() || chosen;
+    const box = $("#edit-error");
+    if (!user_category) {
+      box.hidden = false;
+      box.textContent = "Сначала напишите или выберите статью";
+      return;
+    }
+    try {
+      const res = await api(`/api/transactions/${t.id}/apply-mcc`, {
+        method: "POST",
+        body: { kind: mode, user_category },
+      });
+      await afterEditSave(`Код MCC ${res.mcc}: ${user_category} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`);
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не удалось отнести по коду";
+    }
+  });
+
+  $("#apply-desc")?.addEventListener("click", async () => {
+    const user_category = input.value.trim() || chosen;
+    const box = $("#edit-error");
+    if (!user_category) {
+      box.hidden = false;
+      box.textContent = "Сначала напишите или выберите статью";
+      return;
+    }
+    try {
+      const res = await api(`/api/transactions/${t.id}/apply-description`, {
+        method: "POST",
+        body: { kind: mode, user_category },
+      });
+      await afterEditSave(
+        `«${res.description}»: ${user_category} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`
+      );
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не удалось отнести по описанию";
+    }
+  });
+
+  $("#rename-article")?.addEventListener("click", async () => {
+    const newName = input.value.trim() || chosen;
+    const oldName = currentCat(t);
+    const box = $("#edit-error");
+    if (!newName) {
+      box.hidden = false;
+      box.textContent = "Напишите новое название статьи";
+      return;
+    }
+    try {
+      const res = await api("/api/categories/rename", {
+        method: "POST",
+        body: { old_name: oldName, new_name: newName, kind: mode },
+      });
+      if (state.ops?.category === oldName) state.ops.category = newName;
+      await afterEditSave(`Статья «${oldName}» → «${newName}» · ${res.count || 0} ${plural(res.count || 0, "операция", "операции", "операций")}`);
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не переименовалось";
+    }
+  });
+}
+
+async function showOps(bucket, category) {
+  const cat = (category || "").trim();
+  const title = cat || (bucket === "income" ? "Доходы" : "Расходы");
+  state.view = "ops";
+  state.ops = { bucket, category: cat, title, transactions: [], sum: 0, loading: true };
+  render();
+  const q = new URLSearchParams({
+    year: String(state.year),
+    month: String(state.month),
+    bucket,
+    limit: "2000",
+  });
+  if (cat) q.set("category", cat);
+  try {
+    const res = await api(`/api/transactions?${q}`);
+    state.ops = {
+      bucket,
+      category: cat,
+      title,
+      transactions: res.transactions || [],
+      sum: res.sum || 0,
+      loading: false,
+    };
+  } catch (err) {
+    state.ops = { bucket, category: cat, title, transactions: [], sum: 0, loading: false };
+    state.notice = err.data?.detail || err.message || "Не удалось открыть операции";
+  }
+  render();
+}
+
+function goHome() {
+  state.view = "home";
+  state.reviewId = null;
+  render();
+  loadSummary();
+}
+
+async function showQueue() {
+  state.view = "queue";
+  state.reviewId = null;
+  render();
+  try {
+    await fetchSummary();
+  } catch (err) {
+    state.notice = err.data?.detail || err.message || "Не удалось открыть очередь";
+  }
+  if (state.view === "queue") render();
+}
+
+function bindAppClicks() {
+  if (app.dataset.navBound) return;
+  app.dataset.navBound = "1";
+  app.addEventListener("click", (e) => {
+    const nav = e.target.closest("[data-nav]");
+    if (!nav) return;
+    e.preventDefault();
+    if (nav.getAttribute("data-nav") === "home") goHome();
+    else if (nav.getAttribute("data-nav") === "queue") showQueue();
+  });
+}
+
+async function acceptAllIncome() {
+  const n = pendingIncome(state.review?.transactions).length;
+  if (!n) {
+    alert("В очереди нет входящих переводов");
+    return;
+  }
+  if (!confirm("Все плюсовые операции станут доходом. Минусовые останутся в очереди.")) return;
+  try {
+    const res = await api("/api/review/income", { method: "POST" });
+    state.notice = res.count
+      ? `${res.count} ${plural(res.count, "перевод", "перевода", "переводов")} зачислены в доходы`
+      : "Плюсовых в очереди нет";
+    if (res.telegram_sent) state.notice += " · отчёт в Telegram";
+    state.reviewId = null;
+    await showQueue();
+  } catch (err) {
+    alert(err.data?.detail || err.message || "Не сохранилось");
+  }
+}
+
+function bindAcceptIncome() {
+  $("#accept-income-all")?.addEventListener("click", () => acceptAllIncome());
+}
+
+function bindQueue() {
+  document.querySelectorAll("[data-open]").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.reviewId = el.getAttribute("data-open");
+      state.view = "review";
+      if (state.review?.count) render();
+      else loadReview();
+    });
+  });
+  $("#unlabel-all")?.addEventListener("click", async () => {
+    if (!confirm("Все неразобранные уйдут в «Переводы без разметки»?")) return;
+    try {
+      const res = await api("/api/review/unlabeled", { method: "POST", body: {} });
+      state.notice = res.count
+        ? `${res.count} ${plural(res.count, "перевод", "перевода", "переводов")} без разметки`
+        : "Очередь уже пуста";
+      if (res.telegram_sent) state.notice += " · отчёт в Telegram";
+      await showQueue();
+    } catch (err) {
+      alert(err.data?.detail || err.message || "Не сохранилось");
+    }
+  });
+  bindAcceptIncome();
+  bindEditHits();
 }
 
 function bindReview() {
-  $("#back-home")?.addEventListener("click", () => { state.view = "home"; loadSummary(); });
+  bindAcceptIncome();
   const card = $("#review-card");
   if (!card) return;
-  const current = (state.review?.transactions || [])[0];
+  const items = state.review?.transactions || [];
+  const current = items.find((t) => String(t.id) === String(card.dataset.id)) || items[0];
   let mode = current?.kind === "income" ? "income"
     : current?.kind === "transfer" || current?.is_internal ? "transfer"
     : "expense";
@@ -357,7 +973,8 @@ function bindReview() {
   let chosen = "";
 
   const paintChips = () => {
-    const list = mode === "income" ? cats.income : cats.expense;
+    const list = (mode === "income" ? cats.income : cats.expense)
+      .filter((name) => name !== "Переводы без разметки" && name !== "Не разобрано");
     chips.innerHTML = list.map((name) =>
       `<button type="button" class="chip ${chosen === name ? "on" : ""}" data-cat="${esc(name)}">${esc(name)}</button>`
     ).join("");
@@ -409,6 +1026,48 @@ function bindReview() {
       box.textContent = err.message || "Не сохранилось";
     }
   });
+  $("#apply-desc")?.addEventListener("click", async () => {
+    const custom = $("#custom-cat")?.value.trim();
+    const user_category = custom || chosen;
+    const box = $("#review-error");
+    if (mode === "transfer") {
+      box.hidden = false;
+      box.textContent = "Сначала выберите расход или доход";
+      return;
+    }
+    if (!user_category) {
+      box.hidden = false;
+      box.textContent = "Выберите или введите статью";
+      return;
+    }
+    try {
+      const res = await api(`/api/transactions/${card.dataset.id}/apply-description`, {
+        method: "POST",
+        body: { kind: mode, user_category, user_note: $("#note")?.value.trim() || "" },
+      });
+      state.notice = `«${res.description}»: ${user_category} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`;
+      state.reviewId = null;
+      await loadReview();
+    } catch (err) {
+      box.hidden = false;
+      box.textContent = err.data?.detail || err.message || "Не удалось отнести по описанию";
+    }
+  });
+  $("#leave-unlabeled")?.addEventListener("click", async () => {
+    try {
+      const res = await api("/api/review/unlabeled", {
+        method: "POST",
+        body: { id: Number(card.dataset.id) },
+      });
+      state.reviewId = null;
+      if (res.telegram_sent) state.notice = "Очередь пуста · отчёт в Telegram";
+      await loadReview();
+    } catch (err) {
+      const box = $("#review-error");
+      box.hidden = false;
+      box.textContent = err.message || "Не сохранилось";
+    }
+  });
 }
 
 async function pullDrive() {
@@ -424,8 +1083,16 @@ async function pullDrive() {
     state.notice = n
       ? `С Диска: +${n} операций` + (dups ? `, уже были: ${dups}` : "")
       : dups
-        ? "На Диске нет новых операций — эти даты уже в кассе"
+        ? "На Диске нет новых операций — статьи перепроверены"
         : "В папке пока нет выписок";
+    const rec = (res.files || []).map((f) => f.reconcile).find(Boolean) || res.reconcile;
+    if (rec && rec.matched === false) {
+      state.notice += rec.expense_ok === false
+        ? ` · расходы не сходятся на ${money(Math.abs(rec.expense_delta || 0))}`
+        : ` · доходы не сходятся на ${money(Math.abs(rec.income_delta || 0))}`;
+    } else if (rec && rec.matched) {
+      state.notice += " · итоги как в выписке";
+    }
     if (newest.period_to) {
       const [y, m] = newest.period_to.split("-");
       state.year = Number(y);
@@ -459,8 +1126,16 @@ async function upload(file) {
     const res = await api("/api/import", { method: "POST", body });
     const n = res.import?.new_count ?? 0;
     const dups = res.import?.dup_count ?? 0;
-    state.notice = `Добавлено ${n} операций` + (dups ? `, пропущено дубликатов: ${dups}` : "");
+    state.notice = `Добавлено ${n} операций` + (dups ? `, уже были и перепроверены: ${dups}` : "");
     if (res.telegram_sent) state.notice += " · отчёт в Telegram";
+    const rec = res.import?.reconcile;
+    if (rec && rec.matched === false) {
+      state.notice += rec.expense_ok === false
+        ? ` · расходы не сходятся на ${money(Math.abs(rec.expense_delta || 0))}`
+        : ` · доходы не сходятся на ${money(Math.abs(rec.income_delta || 0))}`;
+    } else if (rec && rec.matched) {
+      state.notice += " · итоги как в выписке";
+    }
     if (res.import?.review_count) {
       state.view = "review";
       await loadReview();
@@ -475,16 +1150,42 @@ async function upload(file) {
   }
 }
 
+async function fetchSummary() {
+  const [summary, review] = await Promise.all([
+    api(`/api/summary?year=${state.year}&month=${state.month}`),
+    api("/api/review"),
+  ]);
+  state.summary = summary;
+  state.review = review;
+}
+
 async function loadSummary() {
-  state.summary = await api(`/api/summary?year=${state.year}&month=${state.month}`);
+  try {
+    await fetchSummary();
+  } catch (err) {
+    state.notice = err.data?.detail || err.message || "Не удалось загрузить сводку";
+  }
   render();
 }
 
 async function loadReview() {
-  state.review = await api("/api/review");
-  if (!state.review.count) state.view = "home";
-  if (state.view === "home") await loadSummary();
-  else render();
+  try {
+    state.review = await api("/api/review");
+  } catch (err) {
+    state.notice = err.data?.detail || err.message || "Не удалось загрузить очередь";
+    state.view = "queue";
+    render();
+    return;
+  }
+  if (!state.review.count) {
+    state.view = "queue";
+    await loadSummary();
+    return;
+  }
+  if (state.reviewId && !state.review.transactions.some((t) => String(t.id) === String(state.reviewId))) {
+    state.reviewId = null;
+  }
+  render();
 }
 
 async function shiftMonth(delta) {
@@ -538,6 +1239,7 @@ function esc(s) {
     .replaceAll('"', "&quot;");
 }
 
+bindAppClicks();
 boot().catch((err) => {
   app.innerHTML = `<div class="app-shell"><p class="error">${esc(err.message)}</p></div>`;
 });

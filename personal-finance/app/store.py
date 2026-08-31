@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .parse import ParsedTx
+from .parse import ParsedTx, StatementMeta
+
+UNLABELED_CATEGORY = "Переводы без разметки"
+INCOME_CATEGORY = "Доходы"
+INTERNAL_CATEGORY = "Между своими"
+UNREVIEWED_CATEGORY = "Не разобрано"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS imports (
@@ -60,6 +66,44 @@ CREATE TABLE IF NOT EXISTS category_stance (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mcc_map (
+    mcc TEXT PRIMARY KEY,
+    user_category TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'expense',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS desc_map (
+    desc_key TEXT PRIMARY KEY,
+    user_category TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'expense',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_categories (
+    name TEXT PRIMARY KEY,
+    kind TEXT NOT NULL DEFAULT 'expense',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS statement_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    period_from TEXT,
+    period_to TEXT,
+    stmt_income REAL,
+    stmt_expense REAL,
+    stmt_unconfirmed REAL,
+    stmt_opening REAL,
+    stmt_closing REAL,
+    from_header INTEGER NOT NULL DEFAULT 0,
+    book_income REAL,
+    book_expense REAL,
+    book_holds REAL,
+    matched INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS digests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -70,18 +114,313 @@ CREATE TABLE IF NOT EXISTS digests (
 """
 
 
-def tx_uid(tx: ParsedTx) -> str:
-    key = "|".join(
-        [
-            tx.posted_at.strftime("%Y-%m-%d %H:%M:%S"),
-            f"{tx.amount:.2f}",
-            tx.description,
-            tx.card,
-            tx.mcc,
-            tx.category,
-        ]
+def tx_is_hold(tx: ParsedTx) -> bool:
+    return (tx.status or "").lower() == "hold" or bool((tx.extra or {}).get("hold"))
+
+
+def tx_uid(tx: ParsedTx, *, legacy: bool = False) -> str:
+    extra = tx.extra or {}
+    parts = [
+        tx.posted_at.strftime("%Y-%m-%d %H:%M:%S"),
+        f"{tx.amount:.2f}",
+        tx.description,
+        tx.card,
+        tx.mcc,
+        tx.category,
+    ]
+    if tx_is_hold(tx):
+        parts.append("hold")
+    if not legacy:
+        parts.append(str(extra.get("code") or ""))
+        if tx_is_hold(tx):
+            parts.append(str(extra.get("raw") or "")[:80])
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+_STOP_WORDS = {
+    "hold",
+    "online",
+    "moscow",
+    "moskva",
+    "sankt",
+    "peterbu",
+    "krasnoyarsk",
+    "operation",
+    "операция",
+    "операции",
+    "неподтвержденная",
+    "sber",
+    "карта",
+    "карте",
+    "сумму",
+    "дата",
+    "совершения",
+    "место",
+    "для",
+    "без",
+    "ндс",
+    "руб",
+    "rur",
+}
+
+
+def _op_tokens(*parts: str) -> set[str]:
+    blob = " ".join(p for p in parts if p).lower().replace("ё", "е")
+    blob = blob.replace("tsum", "цум").replace("samokat", "самокат")
+    blob = blob.replace("pyaterochka", "пятерочка").replace("litres", "литрес")
+    words = re.findall(r"[a-zа-я]{3,}", blob)
+    return {w for w in words if w not in _STOP_WORDS}
+
+
+def _same_purchase(tx: ParsedTx, row: sqlite3.Row | dict[str, Any]) -> bool:
+    want = _op_tokens(tx.description)
+    got = _op_tokens(str(row["description"] or ""))
+    return bool(want and got and want & got)
+
+
+def _amount_date_clause(holds: bool) -> str:
+    status = "LOWER(COALESCE(status, '')) = 'hold'"
+    if not holds:
+        status = "LOWER(COALESCE(status, '')) != 'hold'"
+    return f"""
+        abs(amount - ?) < 0.005
+        AND posted_date BETWEEN ? AND ?
+        AND {status}
+    """
+
+
+def _hold_window(posted: date) -> tuple[str, str]:
+    return (posted - timedelta(days=3)).isoformat(), (posted + timedelta(days=3)).isoformat()
+
+
+def _find_matching_neighbors(
+    conn: sqlite3.Connection, tx: ParsedTx, *, holds: bool
+) -> list[sqlite3.Row]:
+    date_from, date_to = _hold_window(tx.posted_date)
+    rows = conn.execute(
+        f"SELECT * FROM transactions WHERE {_amount_date_clause(holds)}",
+        (tx.amount, date_from, date_to),
+    ).fetchall()
+    return [row for row in rows if _same_purchase(tx, row)]
+
+
+def _delete_matching_neighbors(conn: sqlite3.Connection, tx: ParsedTx, *, holds: bool) -> None:
+    for row in _find_matching_neighbors(conn, tx, holds=holds):
+        conn.execute("DELETE FROM transactions WHERE id = ?", (row["id"],))
+
+
+def _lookup_existing(conn: sqlite3.Connection, tx: ParsedTx) -> sqlite3.Row | None:
+    for legacy in (False, True):
+        row = conn.execute(
+            "SELECT * FROM transactions WHERE uid = ?", (tx_uid(tx, legacy=legacy),)
+        ).fetchone()
+        if row:
+            return row
+    return None
+
+
+def _mcc_key(raw: str | None) -> str:
+    digits = re.sub(r"\D", "", str(raw or ""))
+    if len(digits) >= 4:
+        return digits[-4:]
+    return digits
+
+
+def _desc_key(raw: str | None) -> str:
+    return re.sub(r"\s+", " ", str(raw or "")).strip().casefold()
+
+
+def _load_mcc_map(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    rows = conn.execute("SELECT * FROM mcc_map").fetchall()
+    return {_mcc_key(r["mcc"]): r for r in rows if _mcc_key(r["mcc"])}
+
+
+def _apply_mcc_rule(
+    conn: sqlite3.Connection,
+    tx_id: int,
+    mcc: str | None,
+    mcc_map: dict[str, sqlite3.Row],
+) -> bool:
+    rule = mcc_map.get(_mcc_key(mcc))
+    if not rule:
+        return False
+    conn.execute(
+        """
+        UPDATE transactions
+        SET user_category = ?, kind = ?, needs_review = 0
+        WHERE id = ? AND is_internal = 0
+        """,
+        (rule["user_category"], rule["kind"] or "expense", tx_id),
     )
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return True
+
+
+def _load_desc_map(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
+    rows = conn.execute("SELECT * FROM desc_map").fetchall()
+    return {str(r["desc_key"]): r for r in rows if r["desc_key"]}
+
+
+def _apply_desc_rule(
+    conn: sqlite3.Connection,
+    tx_id: int,
+    description: str | None,
+    amount: float,
+    desc_map: dict[str, sqlite3.Row],
+) -> bool:
+    rule = desc_map.get(_desc_key(description))
+    if not rule:
+        return False
+    kind = (rule["kind"] or "expense").strip()
+    if kind == "income" and float(amount) <= 0:
+        return False
+    if kind == "expense" and float(amount) >= 0:
+        return False
+    conn.execute(
+        """
+        UPDATE transactions
+        SET user_category = ?, kind = ?, needs_review = 0, is_internal = 0
+        WHERE id = ?
+        """,
+        (rule["user_category"], kind, tx_id),
+    )
+    return True
+
+
+def _refresh_existing(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    tx: ParsedTx,
+    uid: str,
+    mcc_map: dict[str, sqlite3.Row] | None = None,
+    desc_map: dict[str, sqlite3.Row] | None = None,
+) -> None:
+    locked = bool((row["user_category"] or "").strip())
+    extra_json = json.dumps(tx.extra or {}, ensure_ascii=False)
+    in_queue = int(row["needs_review"] or 0) == 1
+    kind = tx.suggested_kind if in_queue else (row["kind"] or tx.suggested_kind)
+    internal = (
+        (1 if tx.suggested_internal else 0)
+        if in_queue
+        else int(row["is_internal"] or 0)
+    )
+    bank_category = row["bank_category"] if locked else (tx.category or row["bank_category"])
+    description = tx.description or row["description"]
+    conn.execute(
+        """
+        UPDATE transactions SET
+            uid = ?, bank_category = ?, description = ?, mcc = ?, card = ?,
+            status = ?, kind = ?, is_internal = ?, extra = ?
+        WHERE id = ?
+        """,
+        (
+            uid,
+            bank_category,
+            description,
+            tx.mcc or row["mcc"],
+            tx.card or row["card"],
+            tx.status,
+            kind,
+            internal,
+            extra_json,
+            row["id"],
+        ),
+    )
+    if not locked:
+        if not internal:
+            _apply_mcc_rule(conn, int(row["id"]), tx.mcc or row["mcc"], mcc_map or {})
+        _apply_desc_rule(
+            conn,
+            int(row["id"]),
+            description,
+            tx.amount,
+            desc_map or {},
+        )
+
+
+def _money_close(a: float | None, b: float | None) -> bool:
+    if a is None or b is None:
+        return False
+    return abs(float(a) - float(b)) < 0.051
+
+
+def _write_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    filename: str,
+    imported_at: str,
+    period_from: str | None,
+    period_to: str | None,
+    meta: StatementMeta | None,
+) -> dict[str, Any] | None:
+    if not period_from or not period_to:
+        return None
+    book = conn.execute(
+        """
+        SELECT
+            ROUND(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 2) AS income,
+            ROUND(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 2) AS expense,
+            ROUND(SUM(CASE WHEN amount < 0 AND LOWER(COALESCE(status,'')) = 'hold'
+                           THEN -amount ELSE 0 END), 2) AS holds
+        FROM transactions
+        WHERE posted_date >= ? AND posted_date <= ?
+        """,
+        (period_from, period_to),
+    ).fetchone()
+    book_income = float(book["income"] or 0)
+    book_expense = float(book["expense"] or 0)
+    book_holds = float(book["holds"] or 0)
+    stmt_income = meta.income if meta else None
+    stmt_expense = meta.expense if meta else None
+    stmt_unconfirmed = meta.unconfirmed if meta else None
+    matched = _money_close(stmt_income, book_income) and _money_close(
+        stmt_expense, book_expense
+    )
+    conn.execute(
+        """
+        INSERT INTO statement_snapshots (
+            filename, imported_at, period_from, period_to,
+            stmt_income, stmt_expense, stmt_unconfirmed, stmt_opening, stmt_closing,
+            from_header, book_income, book_expense, book_holds, matched
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            filename,
+            imported_at,
+            period_from,
+            period_to,
+            stmt_income,
+            stmt_expense,
+            stmt_unconfirmed,
+            meta.opening if meta else None,
+            meta.closing if meta else None,
+            1 if meta and meta.from_header else 0,
+            book_income,
+            book_expense,
+            book_holds,
+            1 if matched else 0,
+        ),
+    )
+    return {
+        "period_from": period_from,
+        "period_to": period_to,
+        "filename": filename,
+        "from_header": bool(meta and meta.from_header),
+        "stmt_income": stmt_income,
+        "stmt_expense": stmt_expense,
+        "stmt_unconfirmed": stmt_unconfirmed,
+        "book_income": book_income,
+        "book_expense": book_expense,
+        "book_holds": book_holds,
+        "income_ok": _money_close(stmt_income, book_income),
+        "expense_ok": _money_close(stmt_expense, book_expense),
+        "matched": matched,
+        "income_delta": round(book_income - float(stmt_income or 0), 2)
+        if stmt_income is not None
+        else None,
+        "expense_delta": round(book_expense - float(stmt_expense or 0), 2)
+        if stmt_expense is not None
+        else None,
+    }
 
 
 @dataclass
@@ -94,6 +433,8 @@ class ImportResult:
     period_from: str | None
     period_to: str | None
     new_ids: list[int]
+    refreshed_count: int = 0
+    reconcile: dict[str, Any] | None = None
 
 
 class FinanceStore:
@@ -113,14 +454,24 @@ class FinanceStore:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
 
-    def import_transactions(self, txs: list[ParsedTx], filename: str) -> ImportResult:
+    def import_transactions(
+        self,
+        txs: list[ParsedTx],
+        filename: str,
+        meta: StatementMeta | None = None,
+    ) -> ImportResult:
         now = datetime.now().isoformat(timespec="seconds")
         dates = [tx.posted_date.isoformat() for tx in txs]
-        period_from = min(dates) if dates else None
-        period_to = max(dates) if dates else None
+        period_from = (meta.period_from if meta and meta.period_from else None) or (
+            min(dates) if dates else None
+        )
+        period_to = (meta.period_to if meta and meta.period_to else None) or (
+            max(dates) if dates else None
+        )
         new_ids: list[int] = []
         new_count = 0
         dup_count = 0
+        refreshed_count = 0
         review_count = 0
 
         with self.connect() as conn:
@@ -132,24 +483,34 @@ class FinanceStore:
                 (filename, now, period_from, period_to),
             )
             import_id = int(cur.lastrowid)
+            mcc_map = _load_mcc_map(conn)
+            desc_map = _load_desc_map(conn)
             for tx in txs:
                 uid = tx_uid(tx)
-                existing = conn.execute(
-                    "SELECT id FROM transactions WHERE uid = ?", (uid,)
-                ).fetchone()
+                existing = _lookup_existing(conn, tx)
                 if existing:
+                    _refresh_existing(
+                        conn, existing, tx, uid, mcc_map=mcc_map, desc_map=desc_map
+                    )
+                    dup_count += 1
+                    refreshed_count += 1
+                    continue
+                if tx_is_hold(tx) and _find_matching_neighbors(conn, tx, holds=False):
                     dup_count += 1
                     continue
+                if not tx_is_hold(tx):
+                    _delete_matching_neighbors(conn, tx, holds=True)
                 kind = tx.suggested_kind
                 is_internal = 1 if tx.suggested_internal else 0
                 needs = 1 if tx.needs_review else 0
+                extra_json = json.dumps(tx.extra or {}, ensure_ascii=False)
                 cur = conn.execute(
                     """
                     INSERT INTO transactions (
                         uid, import_id, posted_at, posted_date, amount, currency,
                         bank_category, description, mcc, card, status, kind,
                         user_category, user_note, is_internal, needs_review, extra
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, '{}')
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)
                     """,
                     (
                         uid,
@@ -166,9 +527,21 @@ class FinanceStore:
                         kind,
                         is_internal,
                         needs,
+                        extra_json,
                     ),
                 )
                 new_ids.append(int(cur.lastrowid))
+                applied = False
+                if not is_internal:
+                    applied = _apply_mcc_rule(conn, int(cur.lastrowid), tx.mcc, mcc_map)
+                applied = (
+                    _apply_desc_rule(
+                        conn, int(cur.lastrowid), tx.description, tx.amount, desc_map
+                    )
+                    or applied
+                )
+                if applied:
+                    needs = 0
                 new_count += 1
                 if needs:
                     review_count += 1
@@ -180,6 +553,14 @@ class FinanceStore:
                 """,
                 (new_count, dup_count, review_count, import_id),
             )
+            reconcile = _write_snapshot(
+                conn,
+                filename=filename,
+                imported_at=now,
+                period_from=period_from,
+                period_to=period_to,
+                meta=meta,
+            )
         return ImportResult(
             import_id=import_id,
             filename=filename,
@@ -189,6 +570,8 @@ class FinanceStore:
             period_from=period_from,
             period_to=period_to,
             new_ids=new_ids,
+            refreshed_count=refreshed_count,
+            reconcile=reconcile,
         )
 
     def list_imports(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -232,6 +615,30 @@ class FinanceStore:
             rows = conn.execute(sql, args).fetchall()
         return [dict(r) for r in rows]
 
+    def list_ledger(
+        self,
+        date_from: str,
+        date_to: str,
+        *,
+        bucket: str,
+        category: str | None = None,
+        limit: int = 2000,
+    ) -> list[dict[str, Any]]:
+        """Operations that make up an income/expense total or a category bar."""
+        if bucket not in {"income", "expense"}:
+            raise ValueError("bucket must be income or expense")
+        want = (category or "").strip()
+        rows = self.list_transactions(date_from=date_from, date_to=date_to, limit=limit)
+        out = []
+        for row in rows:
+            found, name = classify_pnl(row)
+            if found != bucket:
+                continue
+            if want and name != want:
+                continue
+            out.append(row)
+        return out
+
     def review_count(self) -> int:
         with self.connect() as conn:
             row = conn.execute(
@@ -248,11 +655,16 @@ class FinanceStore:
         user_note: str = "",
         is_internal: bool = False,
     ) -> dict[str, Any]:
-        if kind not in {"expense", "income", "transfer"}:
-            raise ValueError("kind must be expense, income or transfer")
-        internal = 1 if is_internal or kind == "transfer" else 0
-        if internal:
-            kind = "transfer"
+        if kind not in {"expense", "income", "transfer", "unlabeled"}:
+            raise ValueError("kind must be expense, income, transfer or unlabeled")
+        if kind == "unlabeled":
+            internal = 0
+            kind = "unlabeled"
+            user_category = UNLABELED_CATEGORY
+        else:
+            internal = 1 if is_internal or kind == "transfer" else 0
+            if internal:
+                kind = "transfer"
         with self.connect() as conn:
             cur = conn.execute(
                 """
@@ -268,6 +680,232 @@ class FinanceStore:
         row = self.get_transaction(tx_id)
         assert row is not None
         return row
+
+    def recategorize(
+        self,
+        tx_id: int,
+        *,
+        user_category: str,
+        kind: str | None = None,
+        user_note: str | None = None,
+    ) -> dict[str, Any]:
+        """Change the P&L article on an already imported operation."""
+        cat = (user_category or "").strip()
+        if not cat:
+            raise ValueError("Укажите статью")
+        row = self.get_transaction(tx_id)
+        if row is None:
+            raise KeyError(tx_id)
+        note = (row.get("user_note") or "") if user_note is None else user_note
+        chosen = (kind or "").strip()
+        if chosen not in {"income", "expense", "transfer"}:
+            if float(row.get("amount") or 0) > 0:
+                chosen = "income"
+            else:
+                chosen = "expense"
+        if chosen != "transfer":
+            self.ensure_user_category(cat, chosen)
+        return self.review_transaction(
+            tx_id,
+            kind=chosen,
+            user_category=cat,
+            user_note=str(note or ""),
+            is_internal=chosen == "transfer",
+        )
+
+    def ensure_user_category(self, name: str, kind: str = "expense") -> str:
+        cat = (name or "").strip()
+        if not cat:
+            raise ValueError("Укажите статью")
+        bucket = kind if kind in {"expense", "income", "transfer"} else "expense"
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_categories (name, kind, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET kind = excluded.kind
+                """,
+                (cat, bucket, now),
+            )
+        return cat
+
+    def rename_category(self, old_name: str, new_name: str, kind: str | None = None) -> dict[str, Any]:
+        old = (old_name or "").strip()
+        new = (new_name or "").strip()
+        if not old or not new:
+            raise ValueError("Нужны старое и новое название")
+        if old == INTERNAL_CATEGORY or new == INTERNAL_CATEGORY:
+            raise ValueError("Статью «Между своими» лучше не переименовывать")
+        bucket = kind if kind in {"expense", "income", "transfer"} else None
+        self.ensure_user_category(new, bucket or "expense")
+        with self.connect() as conn:
+            if old != new:
+                conn.execute("DELETE FROM user_categories WHERE name = ?", (old,))
+            sql = """
+                UPDATE transactions
+                SET user_category = ?
+                WHERE is_internal = 0
+                  AND TRIM(CASE WHEN user_category != '' THEN user_category ELSE bank_category END) = ?
+                """
+            args: list[Any] = [new, old]
+            if bucket == "income":
+                sql += " AND amount > 0"
+            elif bucket == "expense":
+                sql += " AND amount < 0"
+            cur = conn.execute(sql, args)
+            renamed = int(cur.rowcount)
+            conn.execute(
+                "UPDATE mcc_map SET user_category = ? WHERE user_category = ?",
+                (new, old),
+            )
+            conn.execute(
+                "UPDATE desc_map SET user_category = ? WHERE user_category = ?",
+                (new, old),
+            )
+        return {"old_name": old, "new_name": new, "count": renamed}
+
+    def apply_mcc(
+        self,
+        tx_id: int,
+        *,
+        user_category: str,
+        kind: str | None = None,
+    ) -> dict[str, Any]:
+        row = self.get_transaction(tx_id)
+        if row is None:
+            raise KeyError(tx_id)
+        mcc = _mcc_key(str(row.get("mcc") or ""))
+        if not mcc:
+            raise ValueError("У этой операции нет MCC — отнести по коду нельзя")
+        updated = self.recategorize(tx_id, user_category=user_category, kind=kind)
+        chosen = (updated.get("kind") or "expense").strip()
+        if chosen not in {"income", "expense"}:
+            chosen = "expense" if float(row.get("amount") or 0) < 0 else "income"
+        self.ensure_user_category(user_category, chosen)
+        now = datetime.now().isoformat(timespec="seconds")
+        sign_sql = "amount < 0" if float(row.get("amount") or 0) < 0 else "amount > 0"
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO mcc_map (mcc, user_category, kind, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(mcc) DO UPDATE SET
+                    user_category = excluded.user_category,
+                    kind = excluded.kind,
+                    updated_at = excluded.updated_at
+                """,
+                (mcc, user_category.strip(), chosen, now),
+            )
+            cur = conn.execute(
+                """
+                UPDATE transactions
+                SET user_category = ?, kind = ?, needs_review = 0, is_internal = 0
+                WHERE substr('0000' || replace(replace(COALESCE(mcc,''), '*', ''), ' ', ''), -4) = ?
+                  AND is_internal = 0
+                  AND """
+                + sign_sql,
+                (user_category.strip(), chosen, mcc),
+            )
+            count = int(cur.rowcount)
+        return {
+            "mcc": mcc,
+            "user_category": user_category.strip(),
+            "kind": chosen,
+            "count": count,
+            "transaction": public_tx(self.get_transaction(tx_id) or updated),
+        }
+
+    def apply_description(
+        self,
+        tx_id: int,
+        *,
+        user_category: str,
+        kind: str | None = None,
+    ) -> dict[str, Any]:
+        row = self.get_transaction(tx_id)
+        if row is None:
+            raise KeyError(tx_id)
+        key = _desc_key(str(row.get("description") or ""))
+        if not key:
+            raise ValueError("У этой операции нет описания — отнести по тексту нельзя")
+        chosen = (kind or "").strip()
+        if chosen == "transfer":
+            raise ValueError("По описанию можно отнести только расход или доход")
+        updated = self.recategorize(tx_id, user_category=user_category, kind=kind)
+        chosen = (updated.get("kind") or "expense").strip()
+        if chosen not in {"income", "expense"}:
+            chosen = "expense" if float(row.get("amount") or 0) < 0 else "income"
+        self.ensure_user_category(user_category, chosen)
+        now = datetime.now().isoformat(timespec="seconds")
+        amount = float(row.get("amount") or 0)
+        want_outflow = amount < 0
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO desc_map (desc_key, user_category, kind, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(desc_key) DO UPDATE SET
+                    user_category = excluded.user_category,
+                    kind = excluded.kind,
+                    updated_at = excluded.updated_at
+                """,
+                (key, user_category.strip(), chosen, now),
+            )
+            peers = conn.execute(
+                "SELECT id, description, amount FROM transactions"
+            ).fetchall()
+            ids = [
+                int(peer["id"])
+                for peer in peers
+                if _desc_key(peer["description"]) == key
+                and (float(peer["amount"] or 0) < 0) == want_outflow
+            ]
+            count = 0
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                cur = conn.execute(
+                    f"""
+                    UPDATE transactions
+                    SET user_category = ?, kind = ?, needs_review = 0, is_internal = 0
+                    WHERE id IN ({placeholders})
+                    """,
+                    [user_category.strip(), chosen, *ids],
+                )
+                count = int(cur.rowcount)
+        return {
+            "description": str(row.get("description") or "").strip(),
+            "user_category": user_category.strip(),
+            "kind": chosen,
+            "count": count,
+            "transaction": public_tx(self.get_transaction(tx_id) or updated),
+        }
+
+    def leave_unlabeled(self, tx_id: int | None = None) -> list[dict[str, Any]]:
+        """Park one or all queued transfers in «Переводы без разметки»."""
+        if tx_id is not None:
+            return [self.review_transaction(tx_id, kind="unlabeled")]
+        pending = self.list_transactions(needs_review=True, limit=2000)
+        out = []
+        for row in pending:
+            out.append(self.review_transaction(int(row["id"]), kind="unlabeled"))
+        return out
+
+    def accept_all_income(self) -> list[dict[str, Any]]:
+        """Mark every queued inflow as income; leave outflows in the queue."""
+        pending = self.list_transactions(needs_review=True, limit=2000)
+        out = []
+        for row in pending:
+            if float(row.get("amount") or 0) <= 0:
+                continue
+            out.append(
+                self.review_transaction(
+                    int(row["id"]),
+                    kind="income",
+                    user_category=INCOME_CATEGORY,
+                )
+            )
+        return out
 
     def categories(self) -> dict[str, list[str]]:
         with self.connect() as conn:
@@ -285,8 +923,15 @@ class FinanceStore:
         for row in rows:
             kind = row["kind"] if row["kind"] in buckets else "expense"
             cat = (row["cat"] or "").strip()
-            if cat:
+            if cat and cat != UNLABELED_CATEGORY:
                 buckets[kind].add(cat)
+        with self.connect() as conn:
+            saved = conn.execute("SELECT name, kind FROM user_categories").fetchall()
+        for row in saved:
+            kind = row["kind"] if row["kind"] in buckets else "expense"
+            name = (row["name"] or "").strip()
+            if name and name != UNLABELED_CATEGORY:
+                buckets[kind].add(name)
         return {k: sorted(v, key=str.lower) for k, v in buckets.items()}
 
     def summary(self, date_from: str, date_to: str) -> dict[str, Any]:
@@ -300,7 +945,49 @@ class FinanceStore:
                 (date_from, date_to),
             ).fetchall()
         txs = [dict(r) for r in rows]
-        return summarize_rows(txs, date_from, date_to)
+        out = summarize_rows(txs, date_from, date_to)
+        snap = self.latest_snapshot(date_from, date_to)
+        if snap:
+            out["reconcile"] = snap
+        return out
+
+    def latest_snapshot(self, date_from: str, date_to: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM statement_snapshots
+                WHERE period_from <= ? AND period_to >= ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (date_to, date_from),
+            ).fetchone()
+        if not row:
+            return None
+        stmt_income = row["stmt_income"]
+        stmt_expense = row["stmt_expense"]
+        book_income = float(row["book_income"] or 0)
+        book_expense = float(row["book_expense"] or 0)
+        return {
+            "period_from": row["period_from"],
+            "period_to": row["period_to"],
+            "filename": row["filename"],
+            "from_header": bool(row["from_header"]),
+            "stmt_income": stmt_income,
+            "stmt_expense": stmt_expense,
+            "stmt_unconfirmed": row["stmt_unconfirmed"],
+            "book_income": book_income,
+            "book_expense": book_expense,
+            "book_holds": float(row["book_holds"] or 0),
+            "income_ok": _money_close(stmt_income, book_income),
+            "expense_ok": _money_close(stmt_expense, book_expense),
+            "matched": bool(row["matched"]),
+            "income_delta": round(book_income - float(stmt_income or 0), 2)
+            if stmt_income is not None
+            else None,
+            "expense_delta": round(book_expense - float(stmt_expense or 0), 2)
+            if stmt_expense is not None
+            else None,
+        }
 
     def previous_period(self, date_from: str, date_to: str) -> tuple[str, str]:
         start = date.fromisoformat(date_from)
@@ -412,6 +1099,21 @@ def effective_category(row: dict[str, Any]) -> str:
     return (row.get("user_category") or row.get("bank_category") or "Без категории").strip()
 
 
+def classify_pnl(row: dict[str, Any]) -> tuple[str | None, str]:
+    """Income/expense by sign, as on the statement. Nothing is dropped from сальдо."""
+    amount = float(row["amount"])
+    if abs(amount) < 0.0001:
+        return None, ""
+    bucket = "income" if amount > 0 else "expense"
+    if (row.get("kind") == "unlabeled") or (row.get("user_category") == UNLABELED_CATEGORY):
+        return bucket, UNLABELED_CATEGORY
+    if int(row.get("needs_review") or 0) == 1:
+        return bucket, UNREVIEWED_CATEGORY
+    if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
+        return bucket, INTERNAL_CATEGORY
+    return bucket, effective_category(row)
+
+
 def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> dict[str, Any]:
     income = 0.0
     expense = 0.0
@@ -422,24 +1124,35 @@ def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> d
     expense_cats: dict[str, float] = {}
     pending: list[dict[str, Any]] = []
 
+    unlabeled_sum = 0.0
+    unlabeled: list[dict[str, Any]] = []
+
     for row in txs:
         amount = float(row["amount"])
+        if amount > 0:
+            income += amount
+        elif amount < 0:
+            expense += abs(amount)
         if int(row.get("needs_review") or 0) == 1:
             unreviewed_count += 1
             unreviewed_sum += amount
             pending.append(public_tx(row))
-            continue
         if int(row.get("is_internal") or 0) == 1 or row.get("kind") == "transfer":
-            internal += amount
+            if int(row.get("needs_review") or 0) != 1:
+                internal += amount
+        bucket, cat = classify_pnl(row)
+        if bucket is None:
             continue
-        cat = effective_category(row)
-        if amount > 0 or row.get("kind") == "income":
-            income += abs(amount)
+        if cat == UNLABELED_CATEGORY:
+            unlabeled.append(public_tx(row))
+            unlabeled_sum += amount
+        if bucket == "income":
             income_cats[cat] = income_cats.get(cat, 0.0) + abs(amount)
         else:
-            expense += abs(amount)
             expense_cats[cat] = expense_cats.get(cat, 0.0) + abs(amount)
 
+    income_bars = round(sum(income_cats.values()), 2)
+    expense_bars = round(sum(expense_cats.values()), 2)
     return {
         "period": {"from": date_from, "to": date_to},
         "income": round(income, 2),
@@ -451,7 +1164,11 @@ def summarize_rows(txs: list[dict[str, Any]], date_from: str, date_to: str) -> d
         "income_by_category": _sorted_cats(income_cats),
         "expense_by_category": _sorted_cats(expense_cats),
         "unreviewed": pending,
+        "unlabeled_count": len(unlabeled),
+        "unlabeled_sum": round(unlabeled_sum, 2),
+        "unlabeled": unlabeled,
         "tx_count": len(txs),
+        "bars_ok": _money_close(income_bars, income) and _money_close(expense_bars, expense),
     }
 
 
@@ -477,6 +1194,7 @@ def public_tx(row: dict[str, Any]) -> dict[str, Any]:
         "description": row.get("description") or "",
         "mcc": row.get("mcc") or "",
         "card": row.get("card") or "",
+        "status": row.get("status") or "",
         "kind": row.get("kind") or "expense",
         "user_category": row.get("user_category") or "",
         "user_note": row.get("user_note") or "",
