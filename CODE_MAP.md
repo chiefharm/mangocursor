@@ -44,6 +44,7 @@
 | `SESSION_LOG.md` | Переписка и решения |
 | `CODE_MAP.md` | Этот файл |
 | `AGENTS.md` | Инструкция для AI |
+| `.cursor/skills/consumer-claims-salon/SKILL.md` | Проверка претензий клиентов салона и шаблоны ответов |
 
 ## Данные на VPS
 
@@ -92,4 +93,4 @@ build_call_message(..., site_label, branch)
 
 ---
 
-*Обновлено: 2026-08-29*
+*Обновлено: 2026-09-05*
