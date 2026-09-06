@@ -196,6 +196,7 @@ async def login(request: Request) -> JSONResponse:
         token,
         httponly=True,
         samesite="lax",
+        secure=request.headers.get("x-forwarded-proto", "").lower() == "https",
         max_age=COOKIE_DAYS * 86400,
     )
     return resp

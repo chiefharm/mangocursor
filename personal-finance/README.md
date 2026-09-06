@@ -75,13 +75,31 @@ bash personal-finance/deploy/deploy_to_vps.sh
 С консоли Timeweb (без ПК) — одна команда, файлы берутся из уже клонированного `/opt/mango-pipeline`:
 
 ```bash
-git -C /opt/mango-pipeline fetch origin cursor/personal-finance-web-2b09 && \
-git -C /opt/mango-pipeline show origin/cursor/personal-finance-web-2b09:personal-finance/deploy/install_on_vps.sh | bash
+git -C /opt/mango-pipeline fetch origin cursor/kassa-domain-2b09 && \
+FINANCE_GIT_BRANCH=cursor/kassa-domain-2b09 \
+FINANCE_DOMAIN=kassa.rost-i-razvitie.ru \
+git -C /opt/mango-pipeline show origin/cursor/kassa-domain-2b09:personal-finance/deploy/install_on_vps.sh | bash
 ```
 
-Скрипт ставит systemd, открывает порт 8090, берёт токен бота из mango `.env` и сам ищет группу «учет финансов». Группы SOCO не трогает.
+Скрипт ставит systemd, nginx и (если DNS уже смотрит на VPS) сертификат Let's Encrypt. Группы SOCO не трогает.
 
-Сайт: `http://ВАШ_IP:8090`
+## Домен
+
+На **rost-i-razvitie.ru** уже сайт психологического центра (хостинг Vigbo). Его не трогаем.
+
+Касса: **https://kassa.rost-i-razvitie.ru**
+
+В DNS Vigbo добавьте одну запись и **не меняйте** NS / A корня:
+
+| Имя | Тип | Значение |
+|-----|-----|----------|
+| `kassa` | A | IP европейского VPS (Timeweb) |
+
+Потом на сервере:
+
+```bash
+FINANCE_DOMAIN=kassa.rost-i-razvitie.ru bash /opt/personal-finance/deploy/setup_domain.sh
+```
 
 ## Telegram-группа
 
@@ -89,18 +107,7 @@ git -C /opt/mango-pipeline show origin/cursor/personal-finance-web-2b09:personal
 
 Слушатель кнопок: `systemctl status personal-finance-bot`. На этом токене `getUpdates` крутит только касса, не mango.
 
-Nginx (пример):
-
-```nginx
-server {
-  listen 80;
-  server_name money.example.com;
-  client_max_body_size 16m;
-  location / {
-    proxy_pass http://127.0.0.1:8090;
-  }
-}
-```
+Nginx ставит `deploy/setup_domain.sh`. Пример: `deploy/kassa.nginx.example`.
 
 ## Секреты
 
@@ -109,6 +116,7 @@ server {
 - `FINANCE_PASSWORD` — вход на сайт
 - `FINANCE_TELEGRAM_BOT_TOKEN` / `FINANCE_TELEGRAM_CHAT_ID` — **группа кассы**, не чаты салона
 - `FINANCE_SITE_URL` — ссылка на сайт в сообщении «разнесите переводы»
+- `FINANCE_DOMAIN` — `kassa.rost-i-razvitie.ru` (корень домена не занимаем)
 - `FINANCE_DRIVE_FOLDER` — папка Google Drive с выписками (ссылка уже в `.env.example`)
 
 База: `data/ledger.sqlite` (выписки и пояснения).
