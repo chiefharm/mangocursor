@@ -218,6 +218,8 @@ API Красноярска проверен 03.07: за день ~324 звонк
 
 **Домен (06.09.2026):** у владельца `rost-i-razvitie.ru`. На корне уже живой сайт центра «Рост и Развитие» (Vigbo). Кассу вешаем на **kassa.rost-i-razvitie.ru**, корень не трогаем. Скрипт `personal-finance/deploy/setup_domain.sh` — nginx + Let's Encrypt. DNS: A-запись `kassa` → IP Timeweb VPS.
 
+**Деплой на Amsterdam (06.09.2026, локальный агент):** Касса на `72.56.27.174` (`/opt/personal-finance`), HTTPS `https://kassa.rost-i-razvitie.ru`. В `requirements.txt` добавлен `openpyxl` (иначе uvicorn падал). Telegram-группу «учет финансов» бот пока не видит — написать в группе и `python -m app.chats --bind`.
+
 ---
 
 *Обновлено: 2026-09-06*
