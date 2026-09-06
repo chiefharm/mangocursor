@@ -1,0 +1,392 @@
+{
+  "categories": [
+    {
+      "id": "men",
+      "title": "Мужские стрижки",
+      "items": [
+        {
+          "id": "men_01",
+          "src": "/static/portfolio/men/men_01.jpg",
+          "thumb": "/static/portfolio/men/men_01_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-3d2c2c01f3160301f73dbdc9dfe85797.jpg",
+          "file_hash": "3d2c2c01f3160301f73dbdc9dfe85797"
+        },
+        {
+          "id": "men_02",
+          "src": "/static/portfolio/men/men_02.jpg",
+          "thumb": "/static/portfolio/men/men_02_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-f7ce18860639bd32814be258bdfb275a.JPG",
+          "file_hash": "f7ce18860639bd32814be258bdfb275a"
+        },
+        {
+          "id": "men_03",
+          "src": "/static/portfolio/men/men_03.jpg",
+          "thumb": "/static/portfolio/men/men_03_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-656cbe007bd3cc51028be29fed2e61f2.jpg",
+          "file_hash": "656cbe007bd3cc51028be29fed2e61f2"
+        },
+        {
+          "id": "men_04",
+          "src": "/static/portfolio/men/men_04.jpg",
+          "thumb": "/static/portfolio/men/men_04_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-bf2066d3ccafdd9b0db7a2cacf908622.jpg",
+          "file_hash": "bf2066d3ccafdd9b0db7a2cacf908622"
+        },
+        {
+          "id": "men_05",
+          "src": "/static/portfolio/men/men_05.jpg",
+          "thumb": "/static/portfolio/men/men_05_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-edb34660e637121c755835d96500a54c.jpg",
+          "file_hash": "edb34660e637121c755835d96500a54c"
+        },
+        {
+          "id": "men_06",
+          "src": "/static/portfolio/men/men_06.jpg",
+          "thumb": "/static/portfolio/men/men_06_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-3d6712110356f780cf707e9db9a1290e.jpg",
+          "file_hash": "3d6712110356f780cf707e9db9a1290e"
+        },
+        {
+          "id": "men_07",
+          "src": "/static/portfolio/men/men_07.jpg",
+          "thumb": "/static/portfolio/men/men_07_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-36433627683ba01eaeb5f0213f56884c.jpg",
+          "file_hash": "36433627683ba01eaeb5f0213f56884c"
+        },
+        {
+          "id": "men_09",
+          "src": "/static/portfolio/men/men_09.jpg",
+          "thumb": "/static/portfolio/men/men_09_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-0a98d364629130540db09b63eb2e7ee0.jpg",
+          "file_hash": "0a98d364629130540db09b63eb2e7ee0"
+        },
+        {
+          "id": "men_10",
+          "src": "/static/portfolio/men/men_10.jpg",
+          "thumb": "/static/portfolio/men/men_10_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-fe698f2916bfa19d9d26e9f40d6ff108.jpg",
+          "file_hash": "fe698f2916bfa19d9d26e9f40d6ff108"
+        },
+        {
+          "id": "men_11",
+          "src": "/static/portfolio/men/men_11.jpg",
+          "thumb": "/static/portfolio/men/men_11_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-844d2bbd6dde265f7d87c8402ca4f9e5.png",
+          "file_hash": "844d2bbd6dde265f7d87c8402ca4f9e5"
+        },
+        {
+          "id": "men_12",
+          "src": "/static/portfolio/men/men_12.jpg",
+          "thumb": "/static/portfolio/men/men_12_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-4ff2dd37f57374102ee8ad961c6d3cfd.JPG",
+          "file_hash": "4ff2dd37f57374102ee8ad961c6d3cfd"
+        },
+        {
+          "id": "men_13",
+          "src": "/static/portfolio/men/men_13.jpg",
+          "thumb": "/static/portfolio/men/men_13_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-c10c48a402a879534e1798afea4c3c8e.jpg",
+          "file_hash": "c10c48a402a879534e1798afea4c3c8e"
+        },
+        {
+          "id": "men_14",
+          "src": "/static/portfolio/men/men_14.jpg",
+          "thumb": "/static/portfolio/men/men_14_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-99523a63b5634790075d8fc2a10c0f7a.jpg",
+          "file_hash": "99523a63b5634790075d8fc2a10c0f7a"
+        },
+        {
+          "id": "men_15",
+          "src": "/static/portfolio/men/men_15.jpg",
+          "thumb": "/static/portfolio/men/men_15_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-88655cd4d7edbdf0c2e4b8dc045353a3.jpg",
+          "file_hash": "88655cd4d7edbdf0c2e4b8dc045353a3"
+        },
+        {
+          "id": "men_16",
+          "src": "/static/portfolio/men/men_16.jpg",
+          "thumb": "/static/portfolio/men/men_16_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-4d0b86fdce77fdf685adecbd82a03c2f.jpg",
+          "file_hash": "4d0b86fdce77fdf685adecbd82a03c2f"
+        }
+      ]
+    },
+    {
+      "id": "women",
+      "title": "Женские стрижки",
+      "items": [
+        {
+          "id": "women_01",
+          "src": "/static/portfolio/women/women_01.jpg",
+          "thumb": "/static/portfolio/women/women_01_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-b812ed779deec095a05f08dcabe97788.png",
+          "file_hash": "b812ed779deec095a05f08dcabe97788"
+        },
+        {
+          "id": "women_02",
+          "src": "/static/portfolio/women/women_02.jpg",
+          "thumb": "/static/portfolio/women/women_02_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-6daa08af8925fc99a442eccae2cc2651.JPG",
+          "file_hash": "6daa08af8925fc99a442eccae2cc2651"
+        },
+        {
+          "id": "women_03",
+          "src": "/static/portfolio/women/women_03.jpg",
+          "thumb": "/static/portfolio/women/women_03_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-55f9d5b93d95a85ecf70bd043f5e3444.png",
+          "file_hash": "55f9d5b93d95a85ecf70bd043f5e3444"
+        },
+        {
+          "id": "women_05",
+          "src": "/static/portfolio/women/women_05.jpg",
+          "thumb": "/static/portfolio/women/women_05_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-270a4c91b66930417c28b3ab8fbeaa25.PNG",
+          "file_hash": "270a4c91b66930417c28b3ab8fbeaa25"
+        },
+        {
+          "id": "women_06",
+          "src": "/static/portfolio/women/women_06.jpg",
+          "thumb": "/static/portfolio/women/women_06_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-af00598e478fa2ef5ee8143d519ec7d0.JPG",
+          "file_hash": "af00598e478fa2ef5ee8143d519ec7d0"
+        },
+        {
+          "id": "women_07",
+          "src": "/static/portfolio/women/women_07.jpg",
+          "thumb": "/static/portfolio/women/women_07_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-c020852e5454c59ab3e89f1c22e66f75.JPG",
+          "file_hash": "c020852e5454c59ab3e89f1c22e66f75"
+        },
+        {
+          "id": "women_08",
+          "src": "/static/portfolio/women/women_08.jpg",
+          "thumb": "/static/portfolio/women/women_08_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-48b53660f5c9d03452cecea96753ebd3.JPG",
+          "file_hash": "48b53660f5c9d03452cecea96753ebd3"
+        },
+        {
+          "id": "women_09",
+          "src": "/static/portfolio/women/women_09.jpg",
+          "thumb": "/static/portfolio/women/women_09_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-19a98fe217e78c3ae4d18666031e5eea.JPG",
+          "file_hash": "19a98fe217e78c3ae4d18666031e5eea"
+        },
+        {
+          "id": "women_10",
+          "src": "/static/portfolio/women/women_10.jpg",
+          "thumb": "/static/portfolio/women/women_10_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-8cce92708dff9f12579449f27ff03732.png",
+          "file_hash": "8cce92708dff9f12579449f27ff03732"
+        },
+        {
+          "id": "women_11",
+          "src": "/static/portfolio/women/women_11.jpg",
+          "thumb": "/static/portfolio/women/women_11_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-ebf5e2c67adf8775613c1af5c50c6e95.JPG",
+          "file_hash": "ebf5e2c67adf8775613c1af5c50c6e95"
+        },
+        {
+          "id": "women_12",
+          "src": "/static/portfolio/women/women_12.jpg",
+          "thumb": "/static/portfolio/women/women_12_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-ea1a901ff99b0644b8c33845b2a69426.JPG",
+          "file_hash": "ea1a901ff99b0644b8c33845b2a69426"
+        },
+        {
+          "id": "women_13",
+          "src": "/static/portfolio/women/women_13.jpg",
+          "thumb": "/static/portfolio/women/women_13_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-2a4469c2adaf9017fe37b1a1d30b5197.JPG",
+          "file_hash": "2a4469c2adaf9017fe37b1a1d30b5197"
+        },
+        {
+          "id": "women_14",
+          "src": "/static/portfolio/women/women_14.jpg",
+          "thumb": "/static/portfolio/women/women_14_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-56f6c164008fac99e140a5ddc90d4d39.JPG",
+          "file_hash": "56f6c164008fac99e140a5ddc90d4d39"
+        },
+        {
+          "id": "women_16",
+          "src": "/static/portfolio/women/women_16.jpg",
+          "thumb": "/static/portfolio/women/women_16_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-ada7a52e7afb4d59c5179e48c3b68852.JPG",
+          "file_hash": "ada7a52e7afb4d59c5179e48c3b68852"
+        }
+      ]
+    },
+    {
+      "id": "color",
+      "title": "Окрашивание волос",
+      "items": [
+        {
+          "id": "color_01",
+          "src": "/static/portfolio/color/color_01.jpg",
+          "thumb": "/static/portfolio/color/color_01_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-0c176a21a20f7a78a7ea8be3014e647c.jpg",
+          "file_hash": "0c176a21a20f7a78a7ea8be3014e647c"
+        },
+        {
+          "id": "color_02",
+          "src": "/static/portfolio/color/color_02.jpg",
+          "thumb": "/static/portfolio/color/color_02_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-e04f507b1d701a7e3f6d9ac85a8576aa.jpg",
+          "file_hash": "e04f507b1d701a7e3f6d9ac85a8576aa"
+        },
+        {
+          "id": "color_03",
+          "src": "/static/portfolio/color/color_03.jpg",
+          "thumb": "/static/portfolio/color/color_03_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-14eb8fa24e5af94cd88b87ca5c1481f7.jpg",
+          "file_hash": "14eb8fa24e5af94cd88b87ca5c1481f7"
+        },
+        {
+          "id": "color_04",
+          "src": "/static/portfolio/color/color_04.jpg",
+          "thumb": "/static/portfolio/color/color_04_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-fd1b87856f4f33724988dacb5f8cb889.jpg",
+          "file_hash": "fd1b87856f4f33724988dacb5f8cb889"
+        },
+        {
+          "id": "color_05",
+          "src": "/static/portfolio/color/color_05.jpg",
+          "thumb": "/static/portfolio/color/color_05_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-658b18e00a01c5f5908c76e30d0dae77.jpg",
+          "file_hash": "658b18e00a01c5f5908c76e30d0dae77"
+        },
+        {
+          "id": "color_06",
+          "src": "/static/portfolio/color/color_06.jpg",
+          "thumb": "/static/portfolio/color/color_06_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-efcd24d7d06cbcdc1cfef5ea36f97e4d.jpg",
+          "file_hash": "efcd24d7d06cbcdc1cfef5ea36f97e4d"
+        },
+        {
+          "id": "color_07",
+          "src": "/static/portfolio/color/color_07.jpg",
+          "thumb": "/static/portfolio/color/color_07_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-012ae50f0821db268d659152140aa583.jpg",
+          "file_hash": "012ae50f0821db268d659152140aa583"
+        },
+        {
+          "id": "color_08",
+          "src": "/static/portfolio/color/color_08.jpg",
+          "thumb": "/static/portfolio/color/color_08_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-eb83e45a376fd02340ad0361e6ff5659.jpg",
+          "file_hash": "eb83e45a376fd02340ad0361e6ff5659"
+        },
+        {
+          "id": "color_09",
+          "src": "/static/portfolio/color/color_09.jpg",
+          "thumb": "/static/portfolio/color/color_09_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-0914edc17842a14235fc1bb4fcc867dd.jpg",
+          "file_hash": "0914edc17842a14235fc1bb4fcc867dd"
+        },
+        {
+          "id": "color_10",
+          "src": "/static/portfolio/color/color_10.jpg",
+          "thumb": "/static/portfolio/color/color_10_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-30c95e36e7f6b94f3329e9a88094067d.jpg",
+          "file_hash": "30c95e36e7f6b94f3329e9a88094067d"
+        },
+        {
+          "id": "color_11",
+          "src": "/static/portfolio/color/color_11.jpg",
+          "thumb": "/static/portfolio/color/color_11_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-e0d01d0222c0b10e3f26d0a48535a1cf.jpg",
+          "file_hash": "e0d01d0222c0b10e3f26d0a48535a1cf"
+        },
+        {
+          "id": "color_12",
+          "src": "/static/portfolio/color/color_12.jpg",
+          "thumb": "/static/portfolio/color/color_12_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-e136897cde2fc62e57f9be71bea50465.jpg",
+          "file_hash": "e136897cde2fc62e57f9be71bea50465"
+        },
+        {
+          "id": "color_13",
+          "src": "/static/portfolio/color/color_13.jpg",
+          "thumb": "/static/portfolio/color/color_13_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-b44dc73d9660079ac90fcd5dff951d03.jpg",
+          "file_hash": "b44dc73d9660079ac90fcd5dff951d03"
+        },
+        {
+          "id": "color_14",
+          "src": "/static/portfolio/color/color_14.jpg",
+          "thumb": "/static/portfolio/color/color_14_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-6c3a7c9a8a4a0aa1cfb86cba47ee28dd.jpg",
+          "file_hash": "6c3a7c9a8a4a0aa1cfb86cba47ee28dd"
+        },
+        {
+          "id": "color_15",
+          "src": "/static/portfolio/color/color_15.jpg",
+          "thumb": "/static/portfolio/color/color_15_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630395/6391779/83826014/1000-socokrsk-1bc9ccc5f0a3a4c7e61da2e1334b91fb.png",
+          "file_hash": "1bc9ccc5f0a3a4c7e61da2e1334b91fb"
+        }
+      ]
+    },
+    {
+      "id": "curl",
+      "title": "Хим. завивка",
+      "items": [
+        {
+          "id": "curl_01",
+          "src": "/static/portfolio/curl/curl_01.jpg",
+          "thumb": "/static/portfolio/curl/curl_01_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-6bcc6b6e40e318b6542a9730230f93c5.JPG",
+          "file_hash": "6bcc6b6e40e318b6542a9730230f93c5"
+        },
+        {
+          "id": "curl_02",
+          "src": "/static/portfolio/curl/curl_02.jpg",
+          "thumb": "/static/portfolio/curl/curl_02_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-3dfcd9aa72e9fe69c3be554fcd40e961.JPG",
+          "file_hash": "3dfcd9aa72e9fe69c3be554fcd40e961"
+        },
+        {
+          "id": "curl_03",
+          "src": "/static/portfolio/curl/curl_03.jpg",
+          "thumb": "/static/portfolio/curl/curl_03_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-cf37997299bcf7e41c14be6a77605985.jpg",
+          "file_hash": "cf37997299bcf7e41c14be6a77605985"
+        },
+        {
+          "id": "curl_04",
+          "src": "/static/portfolio/curl/curl_04.jpg",
+          "thumb": "/static/portfolio/curl/curl_04_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-c804482d0aa81aa59803a75561454e7f.jpg",
+          "file_hash": "c804482d0aa81aa59803a75561454e7f"
+        },
+        {
+          "id": "curl_05",
+          "src": "/static/portfolio/curl/curl_05.jpg",
+          "thumb": "/static/portfolio/curl/curl_05_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630398/6391781/83826020/1000-socokrsk-3b6e9360af1ffc323f932eb512d338f5.JPG",
+          "file_hash": "3b6e9360af1ffc323f932eb512d338f5"
+        },
+        {
+          "id": "curl_06",
+          "src": "/static/portfolio/curl/curl_06.jpg",
+          "thumb": "/static/portfolio/curl/curl_06_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-cf0ab304e14d3a1d20fc6d533801f05b.JPG",
+          "file_hash": "cf0ab304e14d3a1d20fc6d533801f05b"
+        },
+        {
+          "id": "curl_07",
+          "src": "/static/portfolio/curl/curl_07.jpg",
+          "thumb": "/static/portfolio/curl/curl_07_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-c453657526d3991c9ec9f939815d2919.JPG",
+          "file_hash": "c453657526d3991c9ec9f939815d2919"
+        },
+        {
+          "id": "curl_08",
+          "src": "/static/portfolio/curl/curl_08.jpg",
+          "thumb": "/static/portfolio/curl/curl_08_t.jpg",
+          "source_url": "https://cdn-st3.vigbo.com/u4872/137631/blog/6630394/6391778/84796218/1000-socokrsk-56465527eaf0f2641db8c907e4fff19b.JPG",
+          "file_hash": "56465527eaf0f2641db8c907e4fff19b"
+        }
+      ]
+    }
+  ]
+}

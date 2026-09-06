@@ -7,7 +7,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/personal-finance
 EnvironmentFile=/opt/personal-finance/.env
-ExecStart=/opt/personal-finance/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8090
+ExecStart=/opt/personal-finance/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8090 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=always
 RestartSec=3
 

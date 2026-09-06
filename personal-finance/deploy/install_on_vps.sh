@@ -13,6 +13,7 @@ REPO="${MANGO_REPO:-/opt/mango-pipeline}"
 DEST="${DEST:-/opt/personal-finance}"
 PORT="${FINANCE_PORT:-8090}"
 SKIP_FETCH="${FINANCE_SKIP_FETCH:-0}"
+DOMAIN="${FINANCE_DOMAIN:-kassa.rost-i-razvitie.ru}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Нужен root" >&2
@@ -117,6 +118,7 @@ if [[ -n "$PUB" ]]; then
 from app.chats import upsert_env
 from pathlib import Path
 upsert_env(Path("$DEST") / ".env", "FINANCE_SITE_URL", "http://${PUB}:${PORT}")
+upsert_env(Path("$DEST") / ".env", "FINANCE_DOMAIN", "$DOMAIN")
 PY
 fi
 
@@ -156,3 +158,9 @@ elif [[ -f "$DEST/data/.initial-password" ]]; then
 fi
 curl -sS --max-time 5 "http://127.0.0.1:${PORT}/api/health" || true
 echo
+
+if [[ -n "$DOMAIN" && -f "$DEST/deploy/setup_domain.sh" ]]; then
+  echo "==> domain $DOMAIN"
+  chmod +x "$DEST/deploy/setup_domain.sh"
+  FINANCE_DOMAIN="$DOMAIN" DEST="$DEST" FINANCE_PORT="$PORT" bash "$DEST/deploy/setup_domain.sh" || true
+fi
