@@ -4,7 +4,8 @@ param(
     [string]$VpsIp,
     [string]$SshKey = "$env:USERPROFILE\.ssh\id_ed25519",
     [string]$RemoteDir = "/opt/personal-finance",
-    [int]$Port = 8090
+    [int]$Port = 8090,
+    [string]$Domain = "kassa.rost-i-razvitie.ru"
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,9 +36,10 @@ scp -i $SshKey `
     "${Host_}:${RemoteDir}/"
 scp -i $SshKey (Join-Path $App "app\*.py") "${Host_}:${RemoteDir}/app/"
 scp -i $SshKey (Join-Path $App "static\*") "${Host_}:${RemoteDir}/static/"
-scp -i $SshKey (Join-Path $App "deploy\install_on_vps.sh") (Join-Path $App "deploy\personal-finance.service") (Join-Path $App "deploy\personal-finance-bot.service") "${Host_}:${RemoteDir}/deploy/"
+scp -i $SshKey (Join-Path $App "deploy\*") "${Host_}:${RemoteDir}/deploy/"
 
 Write-Host "==> install" -ForegroundColor Cyan
-ssh -i $SshKey $Host_ "chmod +x $RemoteDir/deploy/install_on_vps.sh; sed -i 's/\r`$//' $RemoteDir/deploy/install_on_vps.sh $RemoteDir/deploy/personal-finance.service; FINANCE_SKIP_FETCH=1 DEST=$RemoteDir FINANCE_PORT=$Port bash $RemoteDir/deploy/install_on_vps.sh"
+ssh -i $SshKey $Host_ "chmod +x $RemoteDir/deploy/*.sh; sed -i 's/\r`$//' $RemoteDir/deploy/*.sh $RemoteDir/deploy/*.service; FINANCE_SKIP_FETCH=1 DEST=$RemoteDir FINANCE_PORT=$Port FINANCE_DOMAIN=$Domain bash $RemoteDir/deploy/install_on_vps.sh"
 
-Write-Host "iPhone: http://${VpsIp}:$Port"
+Write-Host "Касса: https://$Domain  (A-запись kassa → $VpsIp)"
+Write-Host "Пока DNS не обновился: http://${VpsIp}:$Port"
