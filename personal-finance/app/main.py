@@ -22,6 +22,7 @@ from .report import month_title
 from .store import FinanceStore, public_tx, INCOME_CATEGORY, UNLABELED_CATEGORY
 from .advice import build_digest
 from .notify import send_after_import, send_after_review_cleared
+from . import llm
 from . import telegram as tg
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,10 +40,11 @@ COOKIE_NAME = "pf_session"
 COOKIE_DAYS = 30
 
 DEFAULT_EXPENSE = [
-    "Продукты",
+    "Супермаркеты",
     "Кафе",
-    "Транспорт",
-    "Жильё",
+    "Машина",
+    "Покупки",
+    "Дети",
     "Связь",
     "Здоровье",
     "Одежда",
@@ -164,6 +166,7 @@ async def health() -> dict:
         "ok": True,
         "telegram": tg.telegram_enabled(),
         "auth_required": bool(_password()) and not _auth_off(),
+        "chat": llm.configured(),
     }
 
 
@@ -177,6 +180,8 @@ async def me(request: Request) -> dict:
         "telegram": tg.telegram_enabled(),
         "demo": _demo(),
         "drive": _drive_on(),
+        "chat": llm.configured(),
+        "chat_error": "" if llm.configured() else llm.NO_KEY,
     }
 
 
@@ -319,6 +324,8 @@ async def summary(year: int | None = None, month: int | None = None) -> dict:
         "summary": current,
         "previous": previous,
         "goal": store.get_goal(),
+        "focus": store.get_focus(y, m),
+        "categories": store.categories(),
         "advice": digest.to_dict(),
     }
 
@@ -352,14 +359,19 @@ async def transactions(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        total = round(sum(abs(float(r["amount"])) for r in rows), 2)
+        if cat:
+            total = round(abs(sum(float(r["amount"]) for r in rows)), 2)
+        else:
+            total = round(sum(abs(float(r["amount"])) for r in rows), 2)
         return {
             "ok": True,
             "bucket": kind,
             "category": cat,
             "count": len(rows),
             "sum": total,
-            "transactions": [public_tx(r) for r in rows],
+            "transactions": [
+                r if r.get("cash") else public_tx(r) for r in rows
+            ],
         }
     rows = store.list_transactions(
         date_from=date_from,
@@ -594,6 +606,39 @@ async def accept_all_income() -> dict:
     }
 
 
+@app.post("/api/focus")
+async def set_focus(request: Request) -> dict:
+    body = await request.json()
+    try:
+        year = int(body.get("year") or 0)
+        month = int(body.get("month") or 0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Нужны год и месяц") from exc
+    if year < 2000 or not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="Нужны год и месяц")
+    focus = None
+    if "income" in body:
+        raw = body.get("income")
+        try:
+            amount = float(
+                str(raw).replace(" ", "").replace("\u00a0", "").replace(",", ".")
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Нужна сумма дохода") from exc
+        try:
+            focus = store.set_focus_income(year, month, amount)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if "expenses" in body:
+        names = body.get("expenses")
+        if not isinstance(names, list):
+            raise HTTPException(status_code=400, detail="Нужен список статей")
+        focus = store.set_focus_expenses(year, month, [str(item) for item in names])
+    if focus is None:
+        raise HTTPException(status_code=400, detail="Нечего сохранять")
+    return {"ok": True, "focus": focus}
+
+
 @app.get("/api/goal")
 async def get_goal() -> dict:
     return {"ok": True, "goal": store.get_goal()}
@@ -611,6 +656,193 @@ async def set_goal(request: Request) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc) or "Нужна сумма цели") from exc
     return {"ok": True, "goal": goal}
+
+
+def _parse_money(raw: object) -> float:
+    if raw in (None, ""):
+        raise ValueError("Нужна сумма")
+    text = str(raw).replace("\u00a0", "").replace(" ", "").replace(",", ".")
+    return float(text)
+
+
+def _posted_or_today(raw: object) -> str:
+    text = str(raw or "").strip()[:10]
+    if not text:
+        return date.today().isoformat()
+    return date.fromisoformat(text).isoformat()
+
+
+@app.post("/api/plans")
+async def set_category_plan(request: Request) -> dict:
+    body = await request.json()
+    raw = body.get("amount")
+    amount = None
+    if raw not in (None, ""):
+        try:
+            amount = _parse_money(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Нужна сумма") from exc
+    try:
+        saved = store.set_plan(
+            int(body.get("year") or date.today().year),
+            int(body.get("month") or date.today().month),
+            kind=str(body.get("kind") or "expense"),
+            name=str(body.get("name") or body.get("category") or ""),
+            amount=amount,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **saved}
+
+
+@app.post("/api/cash/from-card")
+async def cash_from_card(request: Request) -> dict:
+    body = await request.json()
+    try:
+        amount = _parse_money(body.get("amount"))
+        op = store.add_cash_from_card(
+            amount,
+            _posted_or_today(body.get("posted_date")),
+            str(body.get("note") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Нужна сумма") from exc
+    return {"ok": True, "cash_op": op}
+
+
+@app.post("/api/cash/expense")
+async def cash_expense(request: Request) -> dict:
+    body = await request.json()
+    try:
+        amount = _parse_money(body.get("amount"))
+        op = store.add_cash_expense(
+            amount,
+            str(body.get("category") or ""),
+            _posted_or_today(body.get("posted_date")),
+            str(body.get("note") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Нужна сумма") from exc
+    return {"ok": True, "cash_op": op}
+
+
+@app.post("/api/cash/{cash_id}")
+async def update_cash(cash_id: int, request: Request) -> dict:
+    body = await request.json()
+    try:
+        op = store.update_cash_op(
+            cash_id,
+            amount=_parse_money(body.get("amount")),
+            category=str(body.get("category") or ""),
+            posted_date=_posted_or_today(body.get("posted_date")),
+            note=str(body.get("note") or ""),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Операция не найдена") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Не сохранилось") from exc
+    return {"ok": True, "cash_op": op}
+
+
+@app.delete("/api/cash/{cash_id}")
+async def delete_cash(cash_id: int) -> dict:
+    if not store.delete_cash_op(cash_id):
+        raise HTTPException(status_code=404, detail="Операция не найдена")
+    return {"ok": True}
+
+
+@app.post("/api/cash/balance")
+async def set_cash_balance(request: Request) -> dict:
+    body = await request.json()
+    try:
+        result = store.set_cash_amount(
+            _parse_money(body.get("amount")),
+            str(body.get("dest") or "hz"),
+            _posted_or_today(body.get("posted_date")),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Нужна сумма") from exc
+    return {"ok": True, **result}
+
+
+@app.get("/api/stats")
+async def list_stats() -> dict:
+    return {"ok": True, "snapshots": store.list_stat_snapshots()}
+
+
+@app.get("/api/stats/series")
+async def stats_series(
+    months: int = 12,
+    year: int | None = None,
+    month: int | None = None,
+) -> dict:
+    try:
+        series = store.focus_stats_series(
+            months=months,
+            end_year=year,
+            end_month=month,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **series}
+
+
+@app.post("/api/stats/chat")
+async def stats_chat(request: Request) -> dict:
+    body = await request.json()
+    question = str(body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Напишите вопрос")
+    if len(question) > 2000:
+        raise HTTPException(status_code=400, detail="Слишком длинный вопрос")
+    date_from, date_to = _period(
+        int(body["year"]) if body.get("year") else None,
+        int(body["month"]) if body.get("month") else None,
+    )
+    brief = llm.finance_brief(
+        store,
+        date_from=date_from,
+        date_to=date_to,
+        income_categories=body.get("income_categories") or [],
+        expense_categories=body.get("expense_categories") or [],
+        question=question,
+    )
+    try:
+        text = llm.answer(
+            question,
+            brief=brief,
+            history=llm._clean_history(body.get("history")),
+        )
+    except llm.LlmError as exc:
+        status = 503 if "не подключена" in str(exc).lower() else 502
+        raise HTTPException(status_code=status, detail=llm.friendly_error(str(exc))) from exc
+    return {"ok": True, "answer": text}
+
+
+@app.post("/api/stats")
+async def save_stats(request: Request) -> dict:
+    body = await request.json()
+    date_from, date_to = _period(
+        int(body["year"]) if body.get("year") else None,
+        int(body["month"]) if body.get("month") else None,
+    )
+    try:
+        saved = store.save_stat_snapshot(
+            date_from,
+            date_to,
+            body.get("income_categories") or [],
+            body.get("expense_categories") or [],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "snapshot": saved, "snapshots": store.list_stat_snapshots()}
+
+
+@app.delete("/api/stats/{snap_id}")
+async def delete_stats(snap_id: int) -> dict:
+    if not store.delete_stat_snapshot(snap_id):
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    return {"ok": True, "snapshots": store.list_stat_snapshots()}
 
 
 @app.post("/api/notify")

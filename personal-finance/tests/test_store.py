@@ -116,6 +116,49 @@ def test_accept_all_income_leaves_outflows(tmp_path: Path) -> None:
     assert names["Доходы"] == 34667 + 2680
 
 
+def test_positive_amount_saved_as_expense_stays_income(tmp_path: Path) -> None:
+    text = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+10.09.2026 10:00:00;10.09.2026;*1111;OK;1000,00;RUB;1000,00;RUB;;Переводы;;Возврат в магазин
+"""
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(text)), "plus.csv")
+    row = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")[0]
+    saved = store.recategorize(int(row["id"]), user_category="Покупки", kind="expense")
+    assert saved["kind"] == "income"
+    summary = store.summary("2026-09-01", "2026-09-30")
+    income = {c["name"]: c["amount"] for c in summary["income_by_category"]}
+    expense = {c["name"] for c in summary["expense_by_category"]}
+    assert income["Покупки"] == 1000
+    assert "Покупки" not in expense
+    assert summary["expense"] == 0
+    assert summary["income"] == 1000
+
+
+def test_category_bar_nets_refunds_against_spending(tmp_path: Path) -> None:
+    """Same article: spend 2000, refund 1000 → bar shows 1000. Statement totals stay gross."""
+    text = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+10.09.2026 10:00:00;10.09.2026;*1111;OK;-2000,00;RUB;-2000,00;RUB;;Покупки;5411;SHOP
+11.09.2026 10:00:00;11.09.2026;*1111;OK;1000,00;RUB;1000,00;RUB;;Покупки;5411;SHOP REFUND
+12.09.2026 10:00:00;12.09.2026;*1111;OK;5000,00;RUB;5000,00;RUB;;Зарплата;;PAY
+"""
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(text)), "net.csv")
+    summary = store.summary("2026-09-01", "2026-09-30")
+    assert summary["income"] == 6000
+    assert summary["expense"] == 2000
+    assert summary["net"] == 4000
+    assert summary["bars_ok"] is True
+    expense = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    income = {c["name"]: c["amount"] for c in summary["income_by_category"]}
+    assert expense["Покупки"] == 1000
+    assert "Покупки" not in income
+    assert income["Зарплата"] == 5000
+    ops = store.list_ledger("2026-09-01", "2026-09-30", bucket="expense", category="Покупки")
+    assert {round(float(r["amount"]), 2) for r in ops} == {-2000.0, 1000.0}
+
+
 def test_ledger_lists_ops_behind_category_and_totals(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.import_transactions(parse_statement(_write(TINKOFF)), "ops.csv")
@@ -635,6 +678,33 @@ def test_import_reconciles_header_totals(tmp_path: Path) -> None:
     summary = store.summary("2026-08-01", "2026-08-31")
     assert summary["reconcile"]["matched"] is True
     assert summary["bars_ok"] is True
+
+
+def test_finance_brief_covers_other_months_and_expense_articles(tmp_path: Path) -> None:
+    from app.llm import finance_brief
+
+    store = _store(tmp_path)
+    store.import_transactions(parse_statement(_write(TINKOFF)), "aug.csv")
+    september = (
+        "Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;"
+        "Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание\n"
+        "03.09.2026 10:00:00;03.09.2026;*1111;OK;-430,00;RUB;-430,00;RUB;;Такси;4121;YANDEX TAXI\n"
+    )
+    store.import_transactions(parse_statement(_write(september)), "sep.csv")
+    brief = finance_brief(
+        store,
+        date_from="2026-09-01",
+        date_to="2026-09-30",
+        question="как менялось кафе и супермаркеты в августе",
+    )
+    assert "2026-08" in brief
+    assert "Кафе и рестораны" in brief
+    assert "Супермаркеты" in brief
+    assert "Такси" in brief
+    assert "Крупные расходы других месяцев" in brief
+    assert "PYATEROCHKA" in brief
+    assert "Операции «Кафе и рестораны» за все месяцы справки" in brief
+    assert "COFFEE" in brief
 
 
 

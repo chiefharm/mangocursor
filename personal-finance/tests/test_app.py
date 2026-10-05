@@ -258,8 +258,9 @@ def test_apply_description_via_api(client: TestClient) -> None:
 
 def test_review_later_buttons_are_tappable(client: TestClient) -> None:
     page = client.get("/").text
-    assert "static/app.js?v=19" in page
-    assert "static/styles.css?v=19" in page
+    assert "static/app.js?v=35" in page
+    assert "static/styles.css?v=28" in page
+    assert "оплата наличными" in client.get("/static/app.js").text
     js = client.get("/static/app.js").text
     assert 'id="review-later" data-nav="queue"' in js
     assert 'id="tab-queue" data-nav="queue"' in js
@@ -267,7 +268,10 @@ def test_review_later_buttons_are_tappable(client: TestClient) -> None:
     assert "data-apply-desc" in js
     assert "apply-description" in js
     assert "function bindAppClicks()" in js
-    assert "state.view = \"queue\";\n  state.reviewId = null;\n  render();" in js
+    assert "function goBack()" in js
+    assert "popstate" in js
+    assert "history.pushState" in js
+    assert 'state.view = "queue";' in js
     css = client.get("/static/styles.css").text
     tabbar = css.split(".tabbar {", 1)[1].split(".tab {", 1)[0]
     assert "translateX(-50%)" not in tabbar
@@ -332,6 +336,216 @@ def test_duplicates_fix_endpoint(client: TestClient) -> None:
     left = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")
     assert len(left) == 1
     assert left[0]["user_category"] == "Кофе Bloom"
+
+
+def test_focus_saldo_is_separate_from_statement(client: TestClient) -> None:
+    path = _write(TINKOFF)
+    with path.open("rb") as fh:
+        res = client.post("/api/import", files={"file": ("ops.csv", fh, "text/csv")})
+    assert res.status_code == 200, res.text
+    summary = client.get("/api/summary?year=2026&month=8").json()
+    assert summary["focus"]["income"] is None
+    assert summary["focus"]["expenses"] is None
+    carried = client.get("/api/summary?year=2026&month=9").json()
+    assert "Супермаркеты" in carried["focus"]["expenses"]
+    assert "Кафе и рестораны" in carried["focus"]["expenses"]
+    assert summary["summary"]["reconcile"]["matched"] is True
+
+    saved = client.post(
+        "/api/focus",
+        json={"year": 2026, "month": 8, "income": "1 500 000"},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["focus"]["income"] == 1500000
+
+    picked = client.post(
+        "/api/focus",
+        json={"year": 2026, "month": 8, "expenses": ["Супермаркеты"]},
+    )
+    assert picked.status_code == 200, picked.text
+    again = client.get("/api/summary?year=2026&month=8").json()
+    assert again["focus"]["income"] == 1500000
+    assert again["focus"]["expenses"] == ["Супермаркеты"]
+    assert again["summary"]["income"] == 150000
+    assert again["summary"]["reconcile"]["matched"] is True
+
+    other = client.get("/api/summary?year=2026&month=9").json()
+    assert other["focus"]["income"] is None
+    assert other["focus"]["expenses"] == ["Супермаркеты"]
+
+    bad = client.post("/api/focus", json={"year": 2026, "month": 8, "income": -1})
+    assert bad.status_code == 400
+
+
+def test_plans_and_cash_do_not_change_statement_totals(client: TestClient) -> None:
+    plan = client.post(
+        "/api/plans",
+        json={"year": 2026, "month": 9, "kind": "expense", "name": "Кафе", "amount": "100 000"},
+    )
+    assert plan.status_code == 200, plan.text
+    cash = client.post(
+        "/api/cash/expense",
+        json={"amount": "500", "category": "Кафе", "posted_date": "2026-09-15", "note": "кофе"},
+    )
+    assert cash.status_code == 200, cash.text
+    summary = client.get("/api/summary?year=2026&month=9").json()["summary"]
+    assert summary["expense"] == 0
+    assert summary["plans"]["expense"]["Кафе"] == 100000
+    assert summary["wallets"]["cash"]["amount"] == -500
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Кафе"] == 500
+    cafe_ops = client.get(
+        "/api/transactions",
+        params={"year": 2026, "month": 9, "bucket": "expense", "category": "Кафе"},
+    ).json()
+    assert cafe_ops["sum"] == 500
+    assert cafe_ops["count"] == 1
+    assert cafe_ops["transactions"][0]["cash"] is True
+    assert cafe_ops["transactions"][0]["description"] == "кофе"
+    cash_id = cash.json()["cash_op"]["cash_id"]
+    edited = client.post(
+        f"/api/cash/{cash_id}",
+        json={
+            "amount": "700",
+            "category": "Такси",
+            "posted_date": "2026-09-16",
+            "note": "дорога",
+        },
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["cash_op"]["user_category"] == "Такси"
+    again = client.get("/api/summary?year=2026&month=9").json()["summary"]
+    moved = {c["name"]: c["amount"] for c in again["expense_by_category"]}
+    assert moved["Такси"] == 700
+    assert "Кафе" not in moved
+    assert again["wallets"]["cash"]["amount"] == -700
+    taxi_ops = client.get(
+        "/api/transactions",
+        params={"year": 2026, "month": 9, "bucket": "expense", "category": "Такси"},
+    ).json()
+    assert taxi_ops["sum"] == 700
+    assert taxi_ops["transactions"][0]["cash"] is True
+    body = client.get("/api/summary?year=2026&month=9").json()
+    assert "Такси" in body["categories"]["expense"]
+    assert body["focus"]["expense_sum"] == 100700
+
+
+def test_expense_plan_and_selection_carry_forward(client: TestClient) -> None:
+    saved = client.post(
+        "/api/plans",
+        json={"year": 2026, "month": 9, "kind": "expense", "name": "Кафе", "amount": "100000"},
+    )
+    assert saved.status_code == 200, saved.text
+    focus = client.post(
+        "/api/focus",
+        json={
+            "year": 2026,
+            "month": 9,
+            "income": "2000000",
+            "expenses": ["Кафе", "Такси"],
+        },
+    )
+    assert focus.status_code == 200, focus.text
+
+    october = client.get("/api/summary?year=2026&month=10").json()
+    assert october["summary"]["expense"] == 0
+    assert october["summary"]["tx_count"] == 0
+    assert october["summary"]["plans"]["expense"]["Кафе"] == 100000
+    assert october["focus"]["income"] is None
+    assert october["focus"]["expenses"] == ["Кафе", "Такси"]
+    assert october["focus"]["expense_sum"] == 100000
+
+    november = client.get("/api/summary?year=2026&month=11").json()
+    assert november["summary"]["plans"]["expense"]["Кафе"] == 100000
+    assert november["focus"]["expenses"] == ["Кафе", "Такси"]
+
+    changed = client.post(
+        "/api/plans",
+        json={"year": 2026, "month": 10, "kind": "expense", "name": "Кафе", "amount": "80000"},
+    )
+    assert changed.status_code == 200, changed.text
+    october = client.get("/api/summary?year=2026&month=10").json()
+    november = client.get("/api/summary?year=2026&month=11").json()
+    september = client.get("/api/summary?year=2026&month=9").json()
+    assert october["summary"]["plans"]["expense"]["Кафе"] == 80000
+    assert october["focus"]["expense_sum"] == 80000
+    assert november["summary"]["plans"]["expense"]["Кафе"] == 80000
+    assert september["summary"]["plans"]["expense"]["Кафе"] == 100000
+
+    picked = client.post(
+        "/api/focus",
+        json={"year": 2026, "month": 10, "expenses": ["Кафе"]},
+    )
+    assert picked.status_code == 200, picked.text
+    assert client.get("/api/summary?year=2026&month=11").json()["focus"]["expenses"] == ["Кафе"]
+    assert client.get("/api/summary?year=2026&month=9").json()["focus"]["expenses"] == ["Кафе", "Такси"]
+
+    cleared = client.post(
+        "/api/plans",
+        json={"year": 2026, "month": 10, "kind": "expense", "name": "Кафе", "amount": 0},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert "Кафе" not in client.get("/api/summary?year=2026&month=11").json()["summary"]["plans"]["expense"]
+    assert client.get("/api/summary?year=2026&month=9").json()["summary"]["plans"]["expense"]["Кафе"] == 100000
+
+
+def test_stats_series_uses_focus_saldo(client: TestClient) -> None:
+    client.post(
+        "/api/plans",
+        json={"year": 2026, "month": 9, "kind": "expense", "name": "Кафе", "amount": "100000"},
+    )
+    client.post(
+        "/api/focus",
+        json={"year": 2026, "month": 9, "income": "2000000", "expenses": ["Кафе"]},
+    )
+    series = client.get("/api/stats/series?months=3&year=2026&month=10")
+    assert series.status_code == 200, series.text
+    body = series.json()
+    assert body["months"] == 3
+    assert body["expense_names"] == ["Кафе"]
+    by_ym = {p["ym"]: p for p in body["points"]}
+    assert by_ym["2026-09"]["income"] == 2000000
+    assert by_ym["2026-09"]["expense"] == 100000
+    assert by_ym["2026-09"]["net"] == 1900000
+    assert by_ym["2026-09"]["articles"]["Кафе"] == 100000
+    assert by_ym["2026-10"]["income"] == 0
+    assert by_ym["2026-10"]["expense"] == 100000
+    assert by_ym["2026-10"]["has_income"] is False
+
+
+def test_cash_income_and_expense_dates_can_change(client: TestClient) -> None:
+    expense = client.post(
+        "/api/cash/expense",
+        json={"amount": "200", "category": "Кафе", "posted_date": "2026-09-15", "note": "кофе"},
+    )
+    assert expense.status_code == 200, expense.text
+    income = client.post(
+        "/api/cash/from-card",
+        json={"amount": "1000", "posted_date": "2026-09-10", "note": "снял"},
+    )
+    assert income.status_code == 200, income.text
+
+    moved_expense = client.post(
+        f"/api/cash/{expense.json()['cash_op']['cash_id']}",
+        json={"amount": "200", "category": "Кафе", "posted_date": "2026-09-20", "note": "кофе"},
+    )
+    assert moved_expense.status_code == 200, moved_expense.text
+    assert moved_expense.json()["cash_op"]["posted_date"] == "2026-09-20"
+
+    moved_income = client.post(
+        f"/api/cash/{income.json()['cash_op']['cash_id']}",
+        json={"amount": "1000", "posted_date": "2026-10-03", "note": "снял"},
+    )
+    assert moved_income.status_code == 200, moved_income.text
+    saved = moved_income.json()["cash_op"]
+    assert saved["posted_date"] == "2026-10-03"
+    assert saved["amount"] == 1000
+
+    september = client.get("/api/summary?year=2026&month=9").json()["summary"]["cash_ops"]
+    october = client.get("/api/summary?year=2026&month=10").json()["summary"]["cash_ops"]
+    assert any(op["posted_date"] == "2026-09-20" for op in september)
+    assert all(op["posted_date"] != "2026-10-03" for op in september)
+    assert any(op["posted_date"] == "2026-10-03" and op["amount"] == 1000 for op in october)
 
 
 

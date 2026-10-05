@@ -226,6 +226,19 @@ button.kpi:disabled { opacity: 0.55; }
 .kpi.out .v { color: var(--out); }
 .kpi.in .v { color: var(--in); }
 
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font: inherit;
+  color: inherit;
+}
+.check-row input { width: 18px; height: 18px; flex: none; }
+.check-row .name { flex: 1; min-width: 0; }
+.check-row .amt { font-variant-numeric: tabular-nums; font-weight: 700; }
+
 .delta {
   margin-top: 14px;
   color: var(--muted);
@@ -306,6 +319,8 @@ button.ledger-row.cat-hit {
   font-size: 15px;
 }
 .ledger-row .name {
+  display: inline-flex;
+  align-items: center;
   max-width: 52%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -338,6 +353,19 @@ button.ledger-row.cat-hit {
 .fill { height: 100%; background: var(--ink); border-radius: 99px; }
 .fill.out { background: var(--out); }
 .fill.in { background: var(--in); }
+.fill.cat { background: var(--cat-fill, var(--out)); }
+
+.cat-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 99px;
+  background: var(--cat-fill, var(--line));
+  flex-shrink: 0;
+  margin-right: 8px;
+  vertical-align: middle;
+  box-shadow: inset 0 0 0 1px rgba(36, 28, 22, 0.08);
+}
 
 .empty {
   color: var(--muted);
@@ -403,6 +431,15 @@ button.ledger-row.cat-hit {
   min-height: 40px;
 }
 .chip.on { background: var(--ink); color: #f7f1e6; border-color: var(--ink); }
+.chip.tinted {
+  background: var(--cat-bg, var(--chip));
+  border-color: var(--cat-border, var(--line));
+}
+.chip.tinted.on {
+  background: var(--cat-fill, var(--ink));
+  border-color: var(--cat-border, var(--ink));
+  color: var(--ink);
+}
 
 .mode-row { display: flex; gap: 8px; margin: 12px 0; }
 .mode-row button {
@@ -513,8 +550,9 @@ button.income-all {
 }
 .tx-row:last-child { border-bottom: 0; }
 button.tx-row { cursor: pointer; }
-.tx-desc { font-size: 14px; line-height: 1.35; }
+.tx-desc { font-size: 14px; line-height: 1.35; display: flex; align-items: center; }
 .tx-sub { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.tx-row.cash-tx { cursor: default; opacity: 0.96; }
 .tx-amt { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tx-amt.neg { color: var(--out); }
 .tx-amt.pos { color: var(--in); }
@@ -586,6 +624,93 @@ button.tx-row { cursor: pointer; }
 .reconcile-title { font-weight: 700; margin-bottom: 2px; }
 .reconcile.ok { background: rgba(31, 107, 74, 0.1); color: var(--in); }
 .reconcile.bad { background: rgba(163, 59, 44, 0.1); color: var(--out); }
+
+.wallet-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.wallet-amt { font-size: 32px; line-height: 1; margin: 4px 0 0; }
+.cash-actions { display: flex; gap: 8px; margin-top: 12px; }
+.cash-actions .ghost { flex: 1; }
+.cash-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.cash-ops { margin-top: 12px; }
+.cash-op-head { display: flex; align-items: center; gap: 8px; }
+.cash-op-head .tx-row { flex: 1; border-bottom: 0; padding-right: 0; }
+.cash-form .label { margin-top: 4px; }
+.cat-line { margin-bottom: 8px; }
+.cat-line-row { display: flex; align-items: flex-start; gap: 2px; }
+.cat-line-row .cat-hit { flex: 1; min-width: 0; }
+.cat-line-row .ledger-row { margin-top: 8px; margin-bottom: 4px; }
+.cat-line-row .ledger-row .name {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+.cat-line-row .track { margin-bottom: 2px; }
+.cat-amt {
+  text-align: right;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.3;
+  margin: 0 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+.plan-gear {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+}
+.plan-gear.has-plan { color: var(--ink); }
+.plan-gear.on { background: rgba(176, 137, 74, 0.16); color: var(--ink); }
+.plan-edit { margin: 0 0 12px 38px; }
+.plan-edit-actions { display: flex; gap: 8px; margin-top: 8px; }
+.plan-edit-actions .primary, .plan-edit-actions .ghost { flex: 1; }
+.fill.warn { background: #a33b2c; }
+.period-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.period-row button { flex: 1 1 22%; min-width: 72px; }
+.chart-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 8px; }
+.stat-chart { display: block; }
+.chart-zero { stroke: rgba(36, 28, 22, 0.18); stroke-width: 1; }
+.chart-label { fill: var(--muted); font-size: 10px; font-family: inherit; }
+.chart-line { stroke-width: 2.5; }
+.chart-line.in { stroke: var(--in); }
+.chart-line.out { stroke: var(--out); }
+.chart-dot.in { fill: var(--in); }
+.chart-dot.out { fill: var(--out); }
+.chart-legend { display: flex; gap: 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.chart-legend .leg::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 99px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+.chart-legend .leg.in::before { background: var(--in); }
+.chart-legend .leg.out::before { background: var(--out); }
+.stat-article { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.stat-article-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.stat-chat-log { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow: auto; margin: 8px 0; }
+.stat-chat-msg { border-radius: 14px; padding: 8px 10px; background: var(--chip); }
+.stat-chat-msg.me { align-self: flex-end; background: rgba(31, 107, 74, 0.12); }
+.stat-chat-who { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.stat-chat-form textarea { width: 100%; min-height: 64px; border-radius: 14px; border: 1px solid var(--line); padding: 10px; font: inherit; background: transparent; }
+.stat-entry { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+#save-stat { width: 100%; margin: 8px 0 16px; }
 
 @media (max-width: 520px) {
   .banner { flex-direction: column; align-items: stretch; }
