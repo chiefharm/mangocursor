@@ -531,28 +531,11 @@ function unlabeledCard(s) {
     </section>`;
 }
 
-function uniqueDescSeeds(rows) {
-  const seen = new Map();
-  for (const t of rows || []) {
-    if (t?.cash) continue;
-    const key = String(t.description || "").trim().toLowerCase().replace(/\s+/g, " ");
-    if (!key || seen.has(key)) continue;
-    seen.set(key, t);
-  }
-  return [...seen.values()];
-}
-
-function shortDesc(text, n = 42) {
-  const d = String(text || "").trim();
-  return d.length > n ? `${d.slice(0, n)}…` : d;
-}
-
 function opsView() {
   const ops = state.ops || {};
   const rows = ops.transactions || [];
   const title = ops.title || "Операции";
   const showCat = !ops.category;
-  const seeds = uniqueDescSeeds(rows);
   return `
     <div class="app-shell">
       <div class="topbar">
@@ -570,16 +553,6 @@ function opsView() {
           <input class="text-input" id="rename-cat" placeholder="Новое название" value="${esc(ops.category)}" />
           <button class="primary" id="rename-cat-btn" style="width:100%;margin-top:12px">Сохранить название</button>
           <div class="error" id="rename-error" hidden></div>
-        </section>` : ""}
-      ${ops.category && !ops.loading && seeds.length ? `
-        <section class="card">
-          <h2>По описанию</h2>
-          <p class="hint">Найти все операции с тем же текстом и поставить статью «${esc(ops.category)}» — даже если сейчас они «между своими».</p>
-          ${seeds.map((t) => `
-            <button type="button" class="ghost" data-apply-desc="${t.id}" style="width:100%;margin-top:8px">
-              Добавить в статью все с таким описанием${seeds.length > 1 ? ` · ${esc(shortDesc(t.description))}` : ""}
-            </button>`).join("")}
-          <div class="error" id="apply-desc-error" hidden></div>
         </section>` : ""}
       ${rows.length ? `
         <section class="card">
@@ -673,6 +646,7 @@ const EXPENSE_TONE_BY_NAME = {
   "транспорт и такси": 2,
   "такси": 2,
   "машина": 14,
+  "парковка": 14,
   "азс": 14,
   "жилье": 3,
   "жильё": 3,
@@ -682,7 +656,9 @@ const EXPENSE_TONE_BY_NAME = {
   "аптеки": 5,
   "одежда": 6,
   "покупки": 6,
+  "книги": 6,
   "путешествия": 13,
+  "развлечения": 13,
   "подарки": 7,
   "подписки": 8,
   "накопления": 9,
@@ -1136,28 +1112,6 @@ function bindOpsHits() {
 function bindOps() {
   $("#ops-back")?.addEventListener("click", () => goBack());
   bindEditHits();
-  document.querySelectorAll("[data-apply-desc]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const cat = (state.ops?.category || "").trim();
-      const box = $("#apply-desc-error");
-      if (!cat) return;
-      const kind = state.ops?.bucket === "income" ? "income" : "expense";
-      try {
-        const res = await api(`/api/transactions/${btn.getAttribute("data-apply-desc")}/apply-description`, {
-          method: "POST",
-          body: { user_category: cat, kind },
-        });
-        state.notice = `«${shortDesc(res.description, 36)}»: ${cat} · ${res.count} ${plural(res.count, "операция", "операции", "операций")}`;
-        await loadSummary();
-        await showOps(state.ops.bucket, cat);
-      } catch (err) {
-        if (box) {
-          box.hidden = false;
-          box.textContent = err.data?.detail || err.message || "Не удалось отнести по описанию";
-        }
-      }
-    });
-  });
   $("#rename-cat-btn")?.addEventListener("click", async () => {
     const oldName = state.ops?.category || "";
     const newName = ($("#rename-cat")?.value || "").trim();
@@ -2045,41 +1999,73 @@ function shortMonth(title, ym) {
   return names[m] || String(title || "").slice(0, 3).toLowerCase();
 }
 
+const CHART_IN = "#1f6b4a";
+const CHART_OUT = "#a33b2c";
+const CHART_INK = "#1c1610";
+
 function chartMax(values) {
   const nums = values.map(Number).filter((n) => Number.isFinite(n));
   const peak = Math.max(0, ...nums.map(Math.abs), 1);
   return peak;
 }
 
-function barChart(points, valueKey, { signed = false, color = "var(--ink)" } = {}) {
+function shortMoney(n) {
+  const v = Math.abs(Number(n) || 0);
+  if (v >= 1000000) return `${(v / 1000000).toFixed(v >= 10000000 ? 0 : 1).replace(".0", "")} млн`;
+  if (v >= 1000) return `${Math.round(v / 1000)} тыс`;
+  return String(Math.round(v));
+}
+
+function barChart(points, valueKey, { signed = false, color = CHART_INK } = {}) {
   const vals = points.map((p) => Number(p[valueKey] || 0));
   const peak = chartMax(vals);
-  const w = Math.max(280, points.length * 28);
-  const h = 150;
-  const pad = 18;
-  const plotH = h - pad * 2;
+  const w = Math.max(280, points.length * 36);
+  const h = 168;
+  const top = 22;
+  const bottom = 22;
+  const plotH = h - top - bottom;
   const plotW = w - 16;
-  const zeroY = pad + plotH / 2;
+  const zeroY = signed ? top + plotH / 2 : top + plotH;
+  const maxBar = signed ? plotH / 2 : plotH;
   const step = plotW / Math.max(points.length, 1);
+  const grid = signed
+    ? `<line x1="8" y1="${zeroY}" x2="${w - 8}" y2="${zeroY}" class="chart-zero"></line>`
+    : `<line x1="8" y1="${zeroY}" x2="${w - 8}" y2="${zeroY}" class="chart-zero"></line>
+       <line x1="8" y1="${top}" x2="${w - 8}" y2="${top}" class="chart-grid"></line>`;
   const bars = points.map((p, i) => {
     const v = Number(p[valueKey] || 0);
-    const bh = (Math.abs(v) / peak) * (plotH / 2);
-    const x = 8 + i * step + step * 0.2;
-    const bw = Math.max(4, step * 0.6);
-    const y = v >= 0 ? zeroY - bh : zeroY;
-    const fill = signed ? (v >= 0 ? "var(--in)" : "var(--out)") : color;
-    return `<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(1, bh)}" rx="2" fill="${fill}"></rect>`;
+    const bh = (Math.abs(v) / peak) * maxBar;
+    const x = 8 + i * step + step * 0.18;
+    const bw = Math.max(10, step * 0.64);
+    const y = v >= 0 || !signed ? zeroY - Math.max(2, bh) : zeroY;
+    const fill = signed ? (v >= 0 ? CHART_IN : CHART_OUT) : color;
+    const labelY = v >= 0 || !signed
+      ? Math.max(11, y - 4)
+      : Math.min(h - bottom - 2, y + Math.max(2, bh) + 11);
+    return `
+      <rect class="chart-bar" x="${x}" y="${y}" width="${bw}" height="${Math.max(2, bh)}" rx="4" fill="${fill}"></rect>
+      <text x="${x + bw / 2}" y="${labelY}" text-anchor="middle" class="chart-val">${esc(shortMoney(v))}</text>`;
   }).join("");
   const labels = points.map((p, i) => {
     const x = 8 + i * step + step / 2;
-    return `<text x="${x}" y="${h - 4}" text-anchor="middle" class="chart-label">${esc(shortMonth(p.title, p.ym))}</text>`;
+    return `<text x="${x}" y="${h - 5}" text-anchor="middle" class="chart-label">${esc(shortMonth(p.title, p.ym))}</text>`;
   }).join("");
   return `
     <div class="chart-scroll">
       <svg class="stat-chart" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img">
-        <line x1="8" y1="${zeroY}" x2="${w - 8}" y2="${zeroY}" class="chart-zero"></line>
+        ${grid}
         ${bars}${labels}
       </svg>
+    </div>`;
+}
+
+function saldoColumnDiagram(points) {
+  const html = barChart(points, "net", { signed: true });
+  return `
+    ${html}
+    <div class="chart-legend">
+      <span class="leg in">Плюс</span>
+      <span class="leg out">Минус</span>
     </div>`;
 }
 
@@ -2106,12 +2092,12 @@ function overlayLines(points) {
   return `
     <div class="chart-scroll">
       <svg class="stat-chart" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img">
-        <path d="${path(expenses)}" class="chart-line out" fill="none"></path>
-        <path d="${path(incomes)}" class="chart-line in" fill="none"></path>
+        <path d="${path(expenses)}" stroke="${CHART_OUT}" stroke-width="2.5" fill="none"></path>
+        <path d="${path(incomes)}" stroke="${CHART_IN}" stroke-width="2.5" fill="none"></path>
         ${points.map((p, i) => {
           const x = 8 + i * step;
-          return `<circle cx="${x}" cy="${toY(Number(p.expense || 0))}" r="2.5" class="chart-dot out"></circle>
-            <circle cx="${x}" cy="${toY(Number(p.income || 0))}" r="2.5" class="chart-dot in"></circle>`;
+          return `<circle cx="${x}" cy="${toY(Number(p.expense || 0))}" r="2.5" fill="${CHART_OUT}"></circle>
+            <circle cx="${x}" cy="${toY(Number(p.income || 0))}" r="2.5" fill="${CHART_IN}"></circle>`;
         }).join("")}
         ${labels}
       </svg>
@@ -2127,7 +2113,7 @@ function articleBars(points, name) {
     ...p,
     amount: Number((p.articles || {})[name] || 0),
   }));
-  return barChart(rows, "amount", { color: "var(--out)" });
+  return barChart(rows, "amount", { color: CHART_OUT });
 }
 
 function periodButtons() {
@@ -2166,7 +2152,8 @@ function statsView() {
       </section>
       <section class="card">
         <h2>Сальдо по месяцам</h2>
-        ${points.length ? barChart(points, "net", { signed: true }) : `<p class="empty">Нет данных</p>`}
+        <p class="hint">Столбчатая диаграмма: зелёный — плюс, красный — минус.</p>
+        ${points.length ? saldoColumnDiagram(points) : `<p class="empty">Нет данных</p>`}
       </section>
       <section class="card">
         <h2>Доходы и расходы</h2>

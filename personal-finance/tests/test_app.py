@@ -258,15 +258,18 @@ def test_apply_description_via_api(client: TestClient) -> None:
 
 def test_review_later_buttons_are_tappable(client: TestClient) -> None:
     page = client.get("/").text
-    assert "static/app.js?v=35" in page
-    assert "static/styles.css?v=28" in page
+    assert "static/app.js?v=40" in page
+    assert "static/styles.css?v=29" in page
     assert "оплата наличными" in client.get("/static/app.js").text
     js = client.get("/static/app.js").text
     assert 'id="review-later" data-nav="queue"' in js
     assert 'id="tab-queue" data-nav="queue"' in js
     assert 'id="apply-desc"' in js
-    assert "data-apply-desc" in js
+    assert "data-apply-desc" not in js
     assert "apply-description" in js
+    assert "По описанию" not in js
+    assert "function saldoColumnDiagram(" in js
+    assert "Столбчатая диаграмма" in js
     assert "function bindAppClicks()" in js
     assert "function goBack()" in js
     assert "popstate" in js

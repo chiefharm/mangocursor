@@ -211,6 +211,91 @@ def test_rename_category_moves_all_ops(tmp_path: Path) -> None:
     assert "Продукты" in store.categories()["expense"]
 
 
+def test_rename_merges_pharmacy_into_health_and_books_into_shopping(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    csv = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+10.09.2026 12:00:00;10.09.2026;*1111;OK;-430,00;RUB;-430,00;RUB;;Аптеки;5912;RIGLA
+11.09.2026 12:00:00;11.09.2026;*1111;OK;-800,00;RUB;-800,00;RUB;;Здоровье;8062;CLINIC
+12.09.2026 12:00:00;12.09.2026;*1111;OK;-350,00;RUB;-350,00;RUB;;Книги;5942;LITRES
+13.09.2026 12:00:00;13.09.2026;*1111;OK;-1200,00;RUB;-1200,00;RUB;;Покупки;5999;OZON
+"""
+    store.import_transactions(parse_statement(_write(csv)), "merge2.csv")
+    store.set_plan(2026, 9, kind="expense", name="Аптеки", amount=2000)
+    store.set_plan(2026, 9, kind="expense", name="Здоровье", amount=5000)
+    store.set_plan(2026, 9, kind="expense", name="Книги", amount=1000)
+    store.set_plan(2026, 9, kind="expense", name="Покупки", amount=10000)
+    store.set_focus_expenses(2026, 9, ["Аптеки", "Здоровье", "Книги", "Покупки"])
+    assert store.rename_category("Аптеки", "Здоровье", "expense")["count"] >= 1
+    assert store.rename_category("Книги", "Покупки", "expense")["count"] >= 1
+    summary = store.summary("2026-09-01", "2026-09-30")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Здоровье"] == 1230
+    assert names["Покупки"] == 1550
+    assert "Аптеки" not in names
+    assert "Книги" not in names
+    plans = store.effective_plans(2026, 9)["expense"]
+    assert plans["Здоровье"] == 7000
+    assert plans["Покупки"] == 11000
+    assert store._raw_focus_expenses(2026, 9) == ["Здоровье", "Покупки"]
+    from app.mcc import category_for_mcc
+
+    assert category_for_mcc(5912) == "Здоровье"
+    assert category_for_mcc(5942) == "Покупки"
+
+
+def test_rename_merges_parking_into_car(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    csv = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+10.09.2026 12:00:00;10.09.2026;*1111;OK;-200,00;RUB;-200,00;RUB;;Парковка;7523;PARKING
+11.09.2026 12:00:00;11.09.2026;*1111;OK;-1500,00;RUB;-1500,00;RUB;;Машина;4121;YANDEX TAXI
+"""
+    store.import_transactions(parse_statement(_write(csv)), "car.csv")
+    store.set_plan(2026, 9, kind="expense", name="Парковка", amount=1000)
+    store.set_plan(2026, 9, kind="expense", name="Машина", amount=15000)
+    store.set_focus_expenses(2026, 9, ["Кафе", "Парковка", "Машина"])
+    result = store.rename_category("Парковка", "Машина", "expense")
+    assert result["count"] >= 1
+    summary = store.summary("2026-09-01", "2026-09-30")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Машина"] == 1700
+    assert "Парковка" not in names
+    plans = store.effective_plans(2026, 9)["expense"]
+    assert plans["Машина"] == 16000
+    assert "Парковка" not in plans
+    assert store._raw_focus_expenses(2026, 9) == ["Кафе", "Машина"]
+    from app.mcc import category_for_mcc
+
+    assert category_for_mcc(7523) == "Машина"
+
+
+def test_rename_merges_entertainment_into_travel(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    csv = """\
+Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
+10.09.2026 12:00:00;10.09.2026;*1111;OK;-1000,00;RUB;-1000,00;RUB;;Развлечения;7999;CINEMA
+11.09.2026 12:00:00;11.09.2026;*1111;OK;-5000,00;RUB;-5000,00;RUB;;Путешествия;4511;AEROFLOT
+"""
+    store.import_transactions(parse_statement(_write(csv)), "travel.csv")
+    store.set_plan(2026, 9, kind="expense", name="Развлечения", amount=3000)
+    store.set_plan(2026, 9, kind="expense", name="Путешествия", amount=20000)
+    store.set_focus_expenses(2026, 9, ["Кафе", "Развлечения", "Путешествия"])
+    result = store.rename_category("Развлечения", "Путешествия", "expense")
+    assert result["count"] >= 1
+    summary = store.summary("2026-09-01", "2026-09-30")
+    names = {c["name"]: c["amount"] for c in summary["expense_by_category"]}
+    assert names["Путешествия"] == 6000
+    assert "Развлечения" not in names
+    plans = store.effective_plans(2026, 9)["expense"]
+    assert plans["Путешествия"] == 23000
+    assert "Развлечения" not in plans
+    assert store._raw_focus_expenses(2026, 9) == ["Кафе", "Путешествия"]
+    from app.mcc import category_for_mcc
+
+    assert category_for_mcc(7999) == "Путешествия"
+
+
 def test_apply_mcc_updates_all_with_code_and_new_imports(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.import_transactions(parse_statement(_write(TWO_MCC)), "mcc.csv")

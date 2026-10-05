@@ -1017,6 +1017,8 @@ class FinanceStore:
             raise ValueError("Статью «Между своими» лучше не переименовывать")
         bucket = kind if kind in {"expense", "income", "transfer"} else None
         self.ensure_user_category(new, bucket or "expense")
+        old_key = _fold_cat(old)
+        new_key = _fold_cat(new)
         with self.connect() as conn:
             if old != new:
                 conn.execute("DELETE FROM user_categories WHERE name = ?", (old,))
@@ -1033,6 +1035,10 @@ class FinanceStore:
                 sql += " AND amount < 0"
             cur = conn.execute(sql, args)
             renamed = int(cur.rowcount)
+            conn.execute(
+                "UPDATE transactions SET bank_category = ? WHERE TRIM(bank_category) = ?",
+                (new, old),
+            )
             cash_cur = conn.execute(
                 "UPDATE cash_ops SET category = ? WHERE TRIM(category) = ?",
                 (new, old),
@@ -1046,6 +1052,100 @@ class FinanceStore:
                 "UPDATE desc_map SET user_category = ? WHERE user_category = ?",
                 (new, old),
             )
+            if old_key != new_key:
+                plan_rows = conn.execute(
+                    "SELECT year, month, kind, amount FROM category_plans WHERE name_key = ?",
+                    (old_key,),
+                ).fetchall()
+                for plan in plan_rows:
+                    existing = conn.execute(
+                        """
+                        SELECT amount FROM category_plans
+                        WHERE year = ? AND month = ? AND kind = ? AND name_key = ?
+                        """,
+                        (plan["year"], plan["month"], plan["kind"], new_key),
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            """
+                            UPDATE category_plans
+                            SET amount = ?, name = ?
+                            WHERE year = ? AND month = ? AND kind = ? AND name_key = ?
+                            """,
+                            (
+                                round(float(existing["amount"] or 0) + float(plan["amount"] or 0), 2),
+                                new,
+                                plan["year"],
+                                plan["month"],
+                                plan["kind"],
+                                new_key,
+                            ),
+                        )
+                        conn.execute(
+                            """
+                            DELETE FROM category_plans
+                            WHERE year = ? AND month = ? AND kind = ? AND name_key = ?
+                            """,
+                            (plan["year"], plan["month"], plan["kind"], old_key),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            UPDATE category_plans
+                            SET name_key = ?, name = ?
+                            WHERE year = ? AND month = ? AND kind = ? AND name_key = ?
+                            """,
+                            (new_key, new, plan["year"], plan["month"], plan["kind"], old_key),
+                        )
+                stance = conn.execute(
+                    "SELECT stance, category FROM category_stance WHERE category_key = ?",
+                    (old_key,),
+                ).fetchone()
+                if stance:
+                    conn.execute(
+                        """
+                        INSERT INTO category_stance (category_key, category, stance, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(category_key) DO UPDATE SET
+                            category = excluded.category,
+                            stance = excluded.stance,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            new_key,
+                            new,
+                            stance["stance"],
+                            datetime.now().isoformat(timespec="seconds"),
+                        ),
+                    )
+                    conn.execute(
+                        "DELETE FROM category_stance WHERE category_key = ?",
+                        (old_key,),
+                    )
+                for row in conn.execute(
+                    "SELECT key, value FROM settings WHERE key LIKE 'focus_expenses:%'"
+                ).fetchall():
+                    try:
+                        names = json.loads(row["value"] or "[]")
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(names, list):
+                        continue
+                    if not any(_fold_cat(str(n)) == old_key for n in names):
+                        continue
+                    merged: list[str] = []
+                    seen: set[str] = set()
+                    for name in names:
+                        label = new if _fold_cat(str(name)) == old_key else str(name).strip()
+                        key = _fold_cat(label)
+                        if not label or key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(label)
+                    conn.execute(
+                        "UPDATE settings SET value = ? WHERE key = ?",
+                        (json.dumps(merged, ensure_ascii=False), row["key"]),
+                    )
         return {"old_name": old, "new_name": new, "count": renamed}
 
     def apply_mcc(

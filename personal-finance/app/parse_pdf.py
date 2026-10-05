@@ -341,7 +341,7 @@ def _hold_merchant(desc: str) -> str:
         )
         name = (m.group(1).strip() if m else "")
     if re.search(r"litres|литрес", f"{name} {desc}", re.I):
-        return "Литрес"
+        return "Покупки"
     return name[:80]
 
 
@@ -354,7 +354,7 @@ def _category_from_text(desc: str, amount: float) -> str:
     if "samokat" in blob or "самокат" in blob:
         return "Супермаркеты"
     if "litres" in blob or "литрес" in blob:
-        return "Книги"
+        return "Покупки"
     if "lemanapro" in blob or "леруа" in blob:
         return "Дом и ремонт"
     if "timeweb" in blob or "reg ru" in blob or "regru" in blob:
@@ -364,7 +364,7 @@ def _category_from_text(desc: str, amount: float) -> str:
     if "оплата по договору" in blob:
         return "Оплата по договору"
     if "лотере" in blob:
-        return "Развлечения"
+        return "Путешествия"
     if amount > 0 and "перевод денежных средств" in blob:
         return "Переводы"
     return ""
