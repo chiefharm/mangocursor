@@ -17,6 +17,14 @@ MCC_NAMES: dict[int, str] = {
     5814: "Кафе и рестораны",
     5813: "Кафе и рестораны",
     5811: "Кафе и рестораны",
+    5818: "Подписки",
+    7941: "Спорт",
+    8299: "Образование",
+    8211: "Образование",
+    8220: "Образование",
+    8241: "Образование",
+    8244: "Образование",
+    8249: "Образование",
     5912: "Аптеки",
     5122: "Аптеки",
     7230: "Красота",
@@ -106,11 +114,35 @@ MCC_NAMES: dict[int, str] = {
 }
 
 
+TRANSFER_MCCS = {6536, 6538, 4829, 6540}
+
+
+def is_transfer_mcc(mcc: str | int | None) -> bool:
+    try:
+        return int(str(mcc or "").strip()) in TRANSFER_MCCS
+    except ValueError:
+        return False
+
+
+def is_known_mcc(mcc: str | int | None) -> bool:
+    """True only for codes we explicitly know — not a bare 4-digit guess."""
+    try:
+        code = int(str(mcc or "").strip())
+    except ValueError:
+        return False
+    return code in MCC_NAMES or code in TRANSFER_MCCS
+
+
 def category_for_mcc(mcc: str | int | None, *, fallback: str = "") -> str:
+    """Map MCC to an article. Unknown purchase codes may use fallback (e.g. «Прочее»)."""
     if mcc in (None, ""):
         return fallback
     try:
         code = int(str(mcc).strip())
     except ValueError:
         return fallback
-    return MCC_NAMES.get(code, fallback)
+    if code in MCC_NAMES:
+        return MCC_NAMES[code]
+    if code in TRANSFER_MCCS:
+        return "Переводы"
+    return fallback

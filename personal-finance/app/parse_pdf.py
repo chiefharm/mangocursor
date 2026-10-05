@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
-from .mcc import category_for_mcc
+from .mcc import category_for_mcc, is_known_mcc, is_transfer_mcc
 from .parse import ParseError, ParsedTx, StatementMeta, classify_review, parse_amount, parse_datetime
 
 _FOOTER = [
@@ -208,7 +208,9 @@ def _op_to_tx(op: dict[str, str | bool]) -> ParsedTx | None:
     if not merchant:
         merchant = _short_desc(desc, code)
 
-    needs, kind, internal = classify_review(category, desc, amount)
+    # Classify on the short merchant name — the raw Alfa line often contains
+    # the word «перевод» even for ordinary card purchases.
+    needs, kind, internal = classify_review(category, merchant or desc, amount)
     blob = desc.lower()
     if any(m in blob for m in _OWN):
         needs, kind, internal = False, "transfer", True
@@ -222,9 +224,16 @@ def _op_to_tx(op: dict[str, str | bool]) -> ParsedTx | None:
     elif any(m in blob for m in _CREDIT_PAY):
         needs, kind, internal = False, "expense", False
         category = "Кредит"
-    elif mcc in {"6536", "6538", "4829", "6540"} or "card2card" in blob:
+    elif is_transfer_mcc(mcc) or "card2card" in blob:
         needs, kind, internal = True, "transfer", False
         category = category or "Переводы"
+    elif mcc and not is_transfer_mcc(mcc):
+        # Card purchase with a trade-point code → expense/income article, no queue.
+        needs = False
+        kind = "income" if amount > 0 else "expense"
+        internal = False
+        if not category:
+            category = category_for_mcc(mcc, fallback="Прочее") or "Прочее"
 
     extra = {"code": code, "raw": desc[:400]}
     if op.get("hold"):
@@ -250,7 +259,9 @@ def _pick_mcc(desc: str) -> str:
     if not found:
         for inner in re.findall(r"\b(\d{4})\b", desc):
             n = int(inner)
-            if n not in {3990, 3991} and category_for_mcc(n):
+            # Only accept 4-digit tokens that are real MCC names — years like 2026
+            # must not become a fake trade-point code.
+            if n not in {3990, 3991} and is_known_mcc(n):
                 found.append(n)
         if not found:
             return ""
@@ -259,7 +270,7 @@ def _pick_mcc(desc: str) -> str:
     if code in {3990, 3991}:
         for inner in re.findall(r"\b(\d{4})\b", desc):
             n = int(inner)
-            if n not in {3990, 3991} and category_for_mcc(n):
+            if n not in {3990, 3991} and is_known_mcc(n):
                 return str(n)
     return str(code)
 

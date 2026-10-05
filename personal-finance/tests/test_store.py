@@ -256,6 +256,50 @@ def test_apply_description_without_text_fails(tmp_path: Path) -> None:
         raise AssertionError("expected ValueError")
 
 
+def test_reimport_clears_mcc_purchases_from_review_queue(tmp_path: Path) -> None:
+    """Old imports left MCC purchases in the queue when the code table had a gap."""
+    from app.parse_pdf import parse_pdf_text
+
+    stuck = """
+Выписка по счету
+Операции по счету
+Дата проводки Код операции Описание Сумма
+в валюте счета
+15.09.2026 CRD_EDU Операция по карте: 220015++++++2987, на сумму: 6890.00 RUR, дата совершения
+операции: 14.09.26, место совершения операции: RU\\MOSCOW\\Bloxy school MCC8299
+-6 890,00 RUR
+16.09.2026 C16 Перевод через Систему быстрых платежей на +7 (900) 111-11-11. Без НДС.
+-500,00 RUR
+"""
+    store = _store(tmp_path)
+    # Simulate legacy row: MCC present, empty bank category, stuck in queue.
+    first = store.import_transactions(parse_pdf_text(stuck), "sep.pdf")
+    assert first.review_count == 1  # only SBP
+    pending = store.list_transactions(needs_review=True)
+    assert len(pending) == 1
+    assert "быстрых платежей" in (pending[0]["description"] or "").lower() or pending[0]["amount"] == -500
+    school = [
+        r
+        for r in store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")
+        if abs(float(r["amount"])) == 6890
+    ][0]
+    assert int(school["needs_review"] or 0) == 0
+    assert school["bank_category"] == "Образование"
+    # Force a stuck MCC purchase like before the fix, then re-import.
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE transactions SET needs_review = 1, bank_category = '', kind = 'transfer' WHERE id = ?",
+            (school["id"],),
+        )
+    assert store.review_count() == 2
+    again = store.import_transactions(parse_pdf_text(stuck), "sep.pdf")
+    assert again.dup_count == 2
+    assert store.review_count() == 1
+    school = store.get_transaction(int(school["id"]))
+    assert int(school["needs_review"] or 0) == 0
+    assert school["bank_category"] == "Образование"
+    assert school["kind"] == "expense"
+
 PIGGY = """\
 Дата операции;Дата платежа;Номер карты;Статус;Сумма операции;Валюта операции;Сумма платежа;Валюта платежа;Кэшбэк;Категория;MCC;Описание
 15.08.2026 10:00:00;15.08.2026;*1111;OK;-55,00;RUB;-55,00;RUB;;Переводы;;Перечисление средств в рамках услуги "Копилка для сдачи" со счета 1

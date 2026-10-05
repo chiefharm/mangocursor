@@ -34,6 +34,18 @@ PETERBU\\SBER 5411 SAMO MCC5411
 10 000,00 RUR
 HOLD Неподтвержденная операция: 1EE4HB TSUM ONLINE 25.08.26 28550.00 RUR, дата операции: 25.08.2026
 -28 550,00 RUR
+15.09.2026 CRD_EDU Операция по карте: 220015++++++2987, на сумму: 6890.00 RUR, дата совершения
+операции: 14.09.26, место совершения операции: RU\\MOSCOW\\Bloxy school MCC8299
+-6 890,00 RUR
+16.09.2026 CRD_PAD Операция по карте: 220015++++++7603, на сумму: 1500.00 RUR, дата совершения
+операции: 15.09.26, место совершения операции: RU\\MOSCOW\\OB PADEL PRIME OKT MCC7941
+-1 500,00 RUR
+17.09.2026 CRD_DIG Операция по карте: 220015++++++2987, на сумму: 60.01 RUR, дата совершения
+операции: 16.09.26, место совершения операции: RU\\MOSCOW\\Being Creative MCC5818
+-60,01 RUR
+18.09.2026 CRD_UNK Операция по карте: 220015++++++2987, на сумму: 420.00 RUR, дата совершения
+операции: 17.09.26, место совершения операции: RU\\MOSCOW\\SOME SHOP MCC7399
+-420,00 RUR
 """
 
 
@@ -46,6 +58,10 @@ def test_alfa_pdf_uses_posting_dates_and_keeps_holds() -> None:
         "2026-08-04",
         "2026-08-07",
         "2026-08-25",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
     ]
 
     piggy = next(t for t in txs if t.amount == -150)
@@ -78,6 +94,26 @@ def test_alfa_pdf_uses_posting_dates_and_keeps_holds() -> None:
     assert tsum.extra.get("hold") is True
     assert tsum.needs_review is False
     assert tsum.suggested_kind == "expense"
+
+    school = next(t for t in txs if t.amount == -6890)
+    assert school.mcc == "8299"
+    assert school.category == "Образование"
+    assert school.needs_review is False
+
+    padel = next(t for t in txs if t.amount == -1500)
+    assert padel.mcc == "7941"
+    assert padel.category == "Спорт"
+    assert padel.needs_review is False
+
+    digital = next(t for t in txs if abs(t.amount - (-60.01)) < 0.001)
+    assert digital.mcc == "5818"
+    assert digital.category == "Подписки"
+    assert digital.needs_review is False
+
+    unknown = next(t for t in txs if t.amount == -420)
+    assert unknown.mcc == "7399"
+    assert unknown.category == "Прочее"
+    assert unknown.needs_review is False
 
 
 def test_alfa_header_totals_and_hold_merchant() -> None:

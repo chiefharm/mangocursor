@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .parse import ParsedTx, StatementMeta
+from .mcc import category_for_mcc, is_transfer_mcc
 
 UNLABELED_CATEGORY = "Переводы без разметки"
 INCOME_CATEGORY = "Доходы"
@@ -305,11 +306,25 @@ def _refresh_existing(
     )
     bank_category = row["bank_category"] if locked else (tx.category or row["bank_category"])
     description = tx.description or row["description"]
+    # On re-import, leave the queue when the bank line now has a real article
+    # (e.g. MCC mapped after a code table update).
+    clear_queue = (
+        in_queue
+        and not locked
+        and not tx.needs_review
+        and not tx.suggested_internal
+    )
+    if clear_queue:
+        kind = tx.suggested_kind
+        internal = 0
+        needs_review = 0
+    else:
+        needs_review = int(row["needs_review"] or 0)
     conn.execute(
         """
         UPDATE transactions SET
             uid = ?, bank_category = ?, description = ?, mcc = ?, card = ?,
-            status = ?, kind = ?, is_internal = ?, extra = ?
+            status = ?, kind = ?, is_internal = ?, needs_review = ?, extra = ?
         WHERE id = ?
         """,
         (
@@ -321,6 +336,7 @@ def _refresh_existing(
             tx.status,
             kind,
             internal,
+            needs_review,
             extra_json,
             row["id"],
         ),
@@ -335,6 +351,36 @@ def _refresh_existing(
             tx.amount,
             desc_map or {},
         )
+
+
+def _auto_release_mcc_purchases(conn: sqlite3.Connection) -> int:
+    """Move queued card purchases with a trade-point MCC into expense/income articles."""
+    rows = conn.execute(
+        """
+        SELECT id, mcc, amount, bank_category
+        FROM transactions
+        WHERE needs_review = 1 AND TRIM(COALESCE(mcc, '')) != ''
+        """
+    ).fetchall()
+    freed = 0
+    for row in rows:
+        mcc = row["mcc"]
+        if is_transfer_mcc(mcc):
+            continue
+        cat = (row["bank_category"] or "").strip() or category_for_mcc(mcc, fallback="Прочее")
+        if not cat or cat == "Переводы":
+            continue
+        kind = "expense" if float(row["amount"] or 0) < 0 else "income"
+        conn.execute(
+            """
+            UPDATE transactions
+            SET bank_category = ?, kind = ?, needs_review = 0, is_internal = 0
+            WHERE id = ?
+            """,
+            (cat, kind, row["id"]),
+        )
+        freed += 1
+    return freed
 
 
 def _money_close(a: float | None, b: float | None) -> bool:
@@ -545,6 +591,14 @@ class FinanceStore:
                 new_count += 1
                 if needs:
                     review_count += 1
+            released = _auto_release_mcc_purchases(conn)
+            if released:
+                # Re-count queue after freeing MCC purchases stuck from older imports.
+                review_count = int(
+                    conn.execute(
+                        "SELECT COUNT(*) AS n FROM transactions WHERE needs_review = 1"
+                    ).fetchone()["n"]
+                )
             conn.execute(
                 """
                 UPDATE imports
