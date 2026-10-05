@@ -1049,6 +1049,61 @@ class FinanceStore:
             "transaction": public_tx(self.get_transaction(tx_id) or updated),
         }
 
+    def find_duplicate_groups(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Groups of likely twin rows for the same bank line (for audit / clean stats)."""
+        rows = self.list_transactions(
+            date_from=date_from, date_to=date_to, limit=10000
+        )
+        buckets: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        for row in rows:
+            if (row.get("status") or "").lower() == "hold":
+                continue
+            code = _extra_code(row)
+            amount_key = round(float(row.get("amount") or 0), 2)
+            if code:
+                key: tuple[Any, ...] = (
+                    row.get("posted_date") or "",
+                    amount_key,
+                    "code",
+                    code,
+                )
+            else:
+                key = (
+                    row.get("posted_date") or "",
+                    amount_key,
+                    "bare",
+                    (row.get("mcc") or "").strip(),
+                    (row.get("card") or "").strip(),
+                    _desc_key(row.get("description")),
+                )
+            buckets.setdefault(key, []).append(row)
+        groups: list[dict[str, Any]] = []
+        for key, items in buckets.items():
+            if len(items) < 2:
+                continue
+            sorted_items = sorted(items, key=lambda r: int(r.get("id") or 0))
+            keeper = max(sorted_items, key=_keeper_rank)
+            extras = [r for r in sorted_items if int(r["id"]) != int(keeper["id"])]
+            groups.append(
+                {
+                    "posted_date": sorted_items[0].get("posted_date"),
+                    "amount": float(sorted_items[0].get("amount") or 0),
+                    "code": _extra_code(sorted_items[0]) or None,
+                    "description": sorted_items[0].get("description") or "",
+                    "count": len(sorted_items),
+                    "extra_count": len(extras),
+                    "keeper_id": int(keeper["id"]),
+                    "keeper_category": effective_category(keeper),
+                    "rows": [public_tx(r) for r in sorted_items],
+                }
+            )
+        groups.sort(key=lambda g: (g["posted_date"] or "", abs(float(g["amount"]))))
+        return groups
+
     def leave_unlabeled(self, tx_id: int | None = None) -> list[dict[str, Any]]:
         """Park one or all queued transfers in «Переводы без разметки»."""
         if tx_id is not None:

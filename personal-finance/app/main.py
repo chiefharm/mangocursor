@@ -370,6 +370,21 @@ async def transactions(
     return {"ok": True, "transactions": [public_tx(r) for r in rows]}
 
 
+@app.get("/api/duplicates")
+async def duplicates(year: int | None = None, month: int | None = None) -> dict:
+    date_from, date_to = _period(year, month)
+    groups = store.find_duplicate_groups(date_from, date_to)
+    extra = sum(int(g.get("extra_count") or 0) for g in groups)
+    return {
+        "ok": True,
+        "period_from": date_from,
+        "period_to": date_to,
+        "group_count": len(groups),
+        "extra_count": extra,
+        "groups": groups,
+    }
+
+
 @app.get("/api/transactions/{tx_id}")
 async def get_transaction(tx_id: int) -> dict:
     row = store.get_transaction(tx_id)

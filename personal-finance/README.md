@@ -35,6 +35,15 @@ systemctl restart personal-finance personal-finance-bot
 Папка с выписками: https://drive.google.com/drive/folders/1VIxQOYkI8T5kGaO8EuzJEduuQBnLyRgj  
 С сервера: `python -m app.pull` (или `--dry-run` только посмотреть).
 
+Проверка дублей за месяц (на VPS после деплоя):
+
+```bash
+cd /opt/personal-finance
+.venv/bin/python -m app.dupes --year 2026 --month 9
+```
+
+Или в браузере (после входа): `https://kassa.rost-i-razvitie.ru/api/duplicates?year=2026&month=9` — если `group_count: 0`, задвоенных строк нет.
+
 ## Локальный запуск
 
 ```bash

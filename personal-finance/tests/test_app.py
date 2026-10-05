@@ -276,4 +276,15 @@ def test_review_later_buttons_are_tappable(client: TestClient) -> None:
     assert "z-index: 40;" in tabbar
 
 
+def test_duplicates_endpoint_empty(client: TestClient) -> None:
+    res = client.get("/api/duplicates?year=2026&month=9")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["group_count"] == 0
+    assert body["extra_count"] == 0
+    assert body["period_from"] == "2026-09-01"
+    assert body["period_to"] == "2026-09-30"
+
+
 

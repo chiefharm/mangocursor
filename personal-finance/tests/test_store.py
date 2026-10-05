@@ -396,6 +396,10 @@ def test_reimport_collapses_existing_twins(tmp_path: Path) -> None:
                 bloom["extra"],
             ),
         )
+    groups = store.find_duplicate_groups("2026-09-01", "2026-09-30")
+    assert len(groups) == 1
+    assert groups[0]["extra_count"] == 1
+    assert groups[0]["keeper_id"] == int(bloom["id"])
     assert len(store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")) == 2
     again = store.import_transactions(parse_pdf_text(pdf), "sep30.pdf")
     assert again.new_count == 0
@@ -403,6 +407,23 @@ def test_reimport_collapses_existing_twins(tmp_path: Path) -> None:
     assert len(rows) == 1
     assert rows[0]["user_category"] == "Кофе Bloom"
     assert int(rows[0]["needs_review"] or 0) == 0
+    assert store.find_duplicate_groups("2026-09-01", "2026-09-30") == []
+
+
+def test_same_day_piggy_not_reported_as_duplicates(tmp_path: Path) -> None:
+    from app.parse_pdf import parse_pdf_text
+
+    text = """
+Выписка по счету
+Операции по счету
+01.08.2026 OP1EDAAA Перечисление средств в рамках услуги "Копилка для сдачи" со счета 1 на счет 2
+-150,00 RUR
+01.08.2026 OP1EDBBB Перечисление средств в рамках услуги "Копилка для сдачи" со счета 1 на счет 2
+-150,00 RUR
+"""
+    store = _store(tmp_path)
+    store.import_transactions(parse_pdf_text(text), "piggy.pdf")
+    assert store.find_duplicate_groups("2026-08-01", "2026-08-01") == []
 
 
 def test_reimport_clears_mcc_purchases_from_review_queue(tmp_path: Path) -> None:
