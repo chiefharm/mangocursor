@@ -210,6 +210,33 @@ def _delete_matching_neighbors(conn: sqlite3.Connection, tx: ParsedTx, *, holds:
         conn.execute("DELETE FROM transactions WHERE id = ?", (row["id"],))
 
 
+def _extra_code(row: sqlite3.Row | dict[str, Any] | ParsedTx) -> str:
+    if isinstance(row, ParsedTx):
+        return str((row.extra or {}).get("code") or "").strip()
+    try:
+        payload = json.loads(row["extra"] or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("code") or "").strip()
+
+
+def _score_existing_match(tx: ParsedTx, row: sqlite3.Row) -> int:
+    """Higher is better. Used when uid drifts after MCC/category remaps."""
+    score = 0
+    code = _extra_code(tx)
+    if code and code == _extra_code(row):
+        score += 8
+    if (tx.mcc or "") and (tx.mcc or "") == (row["mcc"] or ""):
+        score += 4
+    if (tx.card or "") and (tx.card or "") == (row["card"] or ""):
+        score += 2
+    if _same_purchase(tx, row):
+        score += 3
+    return score
+
+
 def _lookup_existing(conn: sqlite3.Connection, tx: ParsedTx) -> sqlite3.Row | None:
     for legacy in (False, True):
         row = conn.execute(
@@ -217,7 +244,45 @@ def _lookup_existing(conn: sqlite3.Connection, tx: ParsedTx) -> sqlite3.Row | No
         ).fetchone()
         if row:
             return row
-    return None
+    # uid includes bank_category — after MCC remap the hash changes, but the
+    # bank line is the same. Match by day + amount + op code / merchant tokens
+    # so a wider re-upload refreshes the old row instead of creating a twin.
+    if tx_is_hold(tx):
+        return None
+    candidates = conn.execute(
+        """
+        SELECT * FROM transactions
+        WHERE posted_date = ?
+          AND abs(amount - ?) < 0.005
+          AND LOWER(COALESCE(status, '')) != 'hold'
+        """,
+        (tx.posted_date.isoformat(), tx.amount),
+    ).fetchall()
+    if not candidates:
+        return None
+    code = _extra_code(tx)
+    if code:
+        by_code = [row for row in candidates if _extra_code(row) == code]
+        if len(by_code) == 1:
+            return by_code[0]
+        if by_code:
+            candidates = by_code
+        else:
+            # Different Alfa operation codes on the same day/amount are distinct
+            # (two «Копилка» transfers etc.). Never merge across codes.
+            if any(_extra_code(row) for row in candidates):
+                return None
+    scored = sorted(
+        ((_score_existing_match(tx, row), int(row["id"]), row) for row in candidates),
+        reverse=True,
+    )
+    best_score, _, best = scored[0]
+    if best_score <= 0:
+        return None
+    # Ambiguous if another row ties the best score.
+    if len(scored) > 1 and scored[1][0] == best_score:
+        return None
+    return best
 
 
 def _mcc_key(raw: str | None) -> str:
@@ -295,36 +360,52 @@ def _refresh_existing(
     mcc_map: dict[str, sqlite3.Row] | None = None,
     desc_map: dict[str, sqlite3.Row] | None = None,
 ) -> None:
+    # Any user-assigned article (incl. «Переводы без разметки») is sacred —
+    # a wider statement re-upload must not wipe manual sorting.
     locked = bool((row["user_category"] or "").strip())
     extra_json = json.dumps(tx.extra or {}, ensure_ascii=False)
     in_queue = int(row["needs_review"] or 0) == 1
+    already_sorted = not in_queue
     kind = tx.suggested_kind if in_queue else (row["kind"] or tx.suggested_kind)
     internal = (
         (1 if tx.suggested_internal else 0)
         if in_queue
         else int(row["is_internal"] or 0)
     )
-    bank_category = row["bank_category"] if locked else (tx.category or row["bank_category"])
-    description = tx.description or row["description"]
+    # Bank article may improve on re-import (MCC remap); that is not user sorting.
+    bank_category = (tx.category or "").strip() or (row["bank_category"] or "")
+    # Keep the user's description if they locked the row; otherwise refresh merchant text.
+    description = (row["description"] if locked else (tx.description or row["description"]))
     # On re-import, leave the queue when the bank line now has a real article
-    # (e.g. MCC mapped after a code table update).
+    # (e.g. MCC mapped after a code table update). Never re-queue a sorted row.
     clear_queue = (
         in_queue
         and not locked
         and not tx.needs_review
         and not tx.suggested_internal
     )
-    if clear_queue:
+    if locked or already_sorted:
+        needs_review = 0 if already_sorted else int(row["needs_review"] or 0)
+        if locked:
+            # Keep the user's kind / internal / review flags exactly.
+            kind = row["kind"] or kind
+            internal = int(row["is_internal"] or 0)
+            needs_review = int(row["needs_review"] or 0)
+    elif clear_queue:
         kind = tx.suggested_kind
         internal = 0
         needs_review = 0
     else:
         needs_review = int(row["needs_review"] or 0)
+    # Hard guard: never put a sorted operation back into the queue.
+    if already_sorted:
+        needs_review = 0
     conn.execute(
         """
         UPDATE transactions SET
             uid = ?, bank_category = ?, description = ?, mcc = ?, card = ?,
-            status = ?, kind = ?, is_internal = ?, needs_review = ?, extra = ?
+            status = ?, kind = ?, is_internal = ?, needs_review = ?, extra = ?,
+            user_category = ?, user_note = ?
         WHERE id = ?
         """,
         (
@@ -333,11 +414,13 @@ def _refresh_existing(
             description,
             tx.mcc or row["mcc"],
             tx.card or row["card"],
-            tx.status,
+            tx.status if not locked else (row["status"] or tx.status),
             kind,
             internal,
             needs_review,
             extra_json,
+            row["user_category"] or "",
+            row["user_note"] or "",
             row["id"],
         ),
     )

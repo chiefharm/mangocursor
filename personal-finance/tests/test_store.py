@@ -256,6 +256,106 @@ def test_apply_description_without_text_fails(tmp_path: Path) -> None:
         raise AssertionError("expected ValueError")
 
 
+def test_reimport_preserves_user_sorted_ops(tmp_path: Path) -> None:
+    """Wider statement re-upload must not wipe already sorted rows."""
+    from app.parse_pdf import parse_pdf_text
+
+    first_pdf = """
+Выписка по счету
+Операции по счету
+Дата проводки Код операции Описание Сумма
+в валюте счета
+10.09.2026 CRD_A Операция по карте: 220015++++++2987, на сумму: 440.00 RUR, дата совершения
+операции: 09.09.26, место совершения операции: RU\\Krasnoyarsk\\BLOOM COFFEE MCC5814
+-440,00 RUR
+11.09.2026 C16 Перевод через Систему быстрых платежей на +7 (900) 111-11-11. Без НДС.
+-500,00 RUR
+"""
+    wider_pdf = """
+Выписка по счету
+Операции по счету
+Дата проводки Код операции Описание Сумма
+в валюте счета
+10.09.2026 CRD_A Операция по карте: 220015++++++2987, на сумму: 440.00 RUR, дата совершения
+операции: 09.09.26, место совершения операции: RU\\Krasnoyarsk\\BLOOM COFFEE MCC5814
+-440,00 RUR
+11.09.2026 C16 Перевод через Систему быстрых платежей на +7 (900) 111-11-11. Без НДС.
+-500,00 RUR
+12.09.2026 CRD_B Операция по карте: 220015++++++2987, на сумму: 300.00 RUR, дата совершения
+операции: 11.09.26, место совершения операции: RU\\Krasnoyarsk\\KOMANDOR MCC5411
+-300,00 RUR
+"""
+    store = _store(tmp_path)
+    store.import_transactions(parse_pdf_text(first_pdf), "sep29.pdf")
+    bloom = [
+        r
+        for r in store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")
+        if "bloom" in (r["description"] or "").lower()
+    ][0]
+    store.recategorize(int(bloom["id"]), user_category="Кофе Bloom", kind="expense")
+    sbp = store.list_transactions(needs_review=True)[0]
+    store.review_transaction(
+        int(sbp["id"]),
+        kind="expense",
+        user_category="Подарки",
+        user_note="маме",
+    )
+    assert store.review_count() == 0
+
+    again = store.import_transactions(parse_pdf_text(wider_pdf), "sep30.pdf")
+    assert again.new_count == 1  # only Komandor
+    assert again.dup_count == 2
+    bloom2 = store.get_transaction(int(bloom["id"]))
+    assert bloom2["user_category"] == "Кофе Bloom"
+    assert int(bloom2["needs_review"] or 0) == 0
+    assert bloom2["kind"] == "expense"
+    sbp2 = store.get_transaction(int(sbp["id"]))
+    assert sbp2["user_category"] == "Подарки"
+    assert sbp2["user_note"] == "маме"
+    assert int(sbp2["needs_review"] or 0) == 0
+    assert store.review_count() == 0
+    komandor = [
+        r
+        for r in store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")
+        if "komandor" in (r["description"] or "").lower()
+    ][0]
+    assert komandor["bank_category"] == "Супермаркеты"
+    assert int(komandor["needs_review"] or 0) == 0
+
+
+def test_reimport_matches_when_bank_category_changes(tmp_path: Path) -> None:
+    """MCC remap changes uid hash — still must refresh the sorted row, not twin it."""
+    from app.parse_pdf import parse_pdf_text
+
+    before = """
+Выписка по счету
+Операции по счету
+Дата проводки Код операции Описание Сумма
+в валюте счета
+10.09.2026 CRD_A Операция по карте: 220015++++++2987, на сумму: 440.00 RUR, дата совершения
+операции: 09.09.26, место совершения операции: RU\\Krasnoyarsk\\BLOOM COFFEE MCC5814
+-440,00 RUR
+"""
+    store = _store(tmp_path)
+    store.import_transactions(parse_pdf_text(before), "sep29.pdf")
+    bloom = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")[0]
+    store.recategorize(int(bloom["id"]), user_category="Кофе Bloom", kind="expense")
+    # Simulate legacy row whose bank_category was empty / wrong so uid no longer matches.
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE transactions SET bank_category = '', uid = 'stale-uid-before-mcc-fix' WHERE id = ?",
+            (bloom["id"],),
+        )
+    again = store.import_transactions(parse_pdf_text(before), "sep30.pdf")
+    assert again.new_count == 0
+    assert again.dup_count == 1
+    rows = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")
+    assert len(rows) == 1
+    assert rows[0]["user_category"] == "Кофе Bloom"
+    assert rows[0]["bank_category"] == "Кафе и рестораны"
+    assert int(rows[0]["needs_review"] or 0) == 0
+
+
 def test_reimport_clears_mcc_purchases_from_review_queue(tmp_path: Path) -> None:
     """Old imports left MCC purchases in the queue when the code table had a gap."""
     from app.parse_pdf import parse_pdf_text
