@@ -1,4 +1,4 @@
-"""List likely duplicate ledger rows for a month (audit before stats)."""
+"""List or collapse likely duplicate ledger rows for a month."""
 
 from __future__ import annotations
 
@@ -23,10 +23,15 @@ def _period(year: int | None, month: int | None) -> tuple[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Показать вероятные дубли операций за месяц"
+        description="Показать или убрать вероятные дубли операций за месяц"
     )
     parser.add_argument("--year", type=int, default=None)
     parser.add_argument("--month", type=int, default=None)
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Удалить лишние строки; оставить разнесённую в каждой группе",
+    )
     parser.add_argument(
         "--db",
         default="",
@@ -45,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Период {date_from} … {date_to}")
     print(f"Групп-двойников: {len(groups)}, лишних строк: {extra}")
     if not groups:
-        print("Дублей не видно — статистика за месяц без задвоенных строк.")
+        print("Дублей нет — статистика уже без задвоенных строк.")
         return 0
     for g in groups:
         code = g.get("code") or "—"
@@ -59,10 +64,11 @@ def main(argv: list[str] | None = None) -> int:
             cat = (row.get("user_category") or row.get("bank_category") or "—").strip()
             review = "очередь" if int(row.get("needs_review") or 0) else "ok"
             print(f"  [{mark}] id={row['id']}  {cat}  {review}")
-    print(
-        "\nЧтобы схлопнуть: залей ту же/более широкую выписку после деплоя PR #8 "
-        "(или python -m app.pull)."
-    )
+    if not args.fix:
+        print("\nЧтобы удалить лишние: добавь флаг --fix")
+        return 0
+    result = store.collapse_duplicates(date_from, date_to)
+    print(f"\nГотово: удалено {result['deleted_count']} лишних строк.")
     return 0
 
 

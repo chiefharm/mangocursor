@@ -385,6 +385,13 @@ async def duplicates(year: int | None = None, month: int | None = None) -> dict:
     }
 
 
+@app.post("/api/duplicates/fix")
+async def duplicates_fix(year: int | None = None, month: int | None = None) -> dict:
+    date_from, date_to = _period(year, month)
+    result = store.collapse_duplicates(date_from, date_to)
+    return {"ok": True, **result}
+
+
 @app.get("/api/transactions/{tx_id}")
 async def get_transaction(tx_id: int) -> dict:
     row = store.get_transaction(tx_id)

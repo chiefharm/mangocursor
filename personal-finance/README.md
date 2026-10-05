@@ -40,9 +40,11 @@ systemctl restart personal-finance personal-finance-bot
 ```bash
 cd /opt/personal-finance
 .venv/bin/python -m app.dupes --year 2026 --month 9
+# убрать лишние строки (оставить разнесённые):
+.venv/bin/python -m app.dupes --year 2026 --month 9 --fix
 ```
 
-Или в браузере (после входа): `https://kassa.rost-i-razvitie.ru/api/duplicates?year=2026&month=9` — если `group_count: 0`, задвоенных строк нет.
+Или в браузере (после входа): `GET /api/duplicates?year=2026&month=9`, затем `POST /api/duplicates/fix?year=2026&month=9`.
 
 ## Локальный запуск
 

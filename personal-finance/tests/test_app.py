@@ -287,4 +287,51 @@ def test_duplicates_endpoint_empty(client: TestClient) -> None:
     assert body["period_to"] == "2026-09-30"
 
 
+def test_duplicates_fix_endpoint(client: TestClient) -> None:
+    from app.parse_pdf import parse_pdf_text
+    from app import main
+
+    pdf = """
+Выписка по счету
+Операции по счету
+10.09.2026 CRD_A Операция по карте: 220015++++++2987, на сумму: 440.00 RUR, дата совершения
+операции: 09.09.26, место совершения операции: RU\\Krasnoyarsk\\BLOOM COFFEE MCC5814
+-440,00 RUR
+"""
+    store = main.store
+    store.import_transactions(parse_pdf_text(pdf), "sep.pdf")
+    bloom = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")[0]
+    store.recategorize(int(bloom["id"]), user_category="Кофе Bloom", kind="expense")
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO transactions (
+                uid, import_id, posted_at, posted_date, amount, currency,
+                bank_category, description, mcc, card, status, kind,
+                user_category, user_note, is_internal, needs_review, extra
+            ) VALUES ('twin', ?, ?, ?, ?, 'RUB', 'Кафе и рестораны', ?, ?, ?, '',
+                      'expense', '', '', 0, 1, ?)
+            """,
+            (
+                bloom["import_id"],
+                bloom["posted_at"],
+                bloom["posted_date"],
+                bloom["amount"],
+                bloom["description"],
+                bloom["mcc"],
+                bloom["card"],
+                bloom["extra"],
+            ),
+        )
+    assert client.get("/api/duplicates?year=2026&month=9").json()["extra_count"] == 1
+    fixed = client.post("/api/duplicates/fix?year=2026&month=9")
+    assert fixed.status_code == 200
+    body = fixed.json()
+    assert body["deleted_count"] == 1
+    assert client.get("/api/duplicates?year=2026&month=9").json()["group_count"] == 0
+    left = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")
+    assert len(left) == 1
+    assert left[0]["user_category"] == "Кофе Bloom"
+
+
 

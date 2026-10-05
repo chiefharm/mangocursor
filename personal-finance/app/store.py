@@ -1104,6 +1104,43 @@ class FinanceStore:
         groups.sort(key=lambda g: (g["posted_date"] or "", abs(float(g["amount"]))))
         return groups
 
+    def collapse_duplicates(
+        self,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete twin rows for the period; keep the already-sorted one in each group."""
+        groups = self.find_duplicate_groups(date_from, date_to)
+        deleted_ids: list[int] = []
+        kept: list[dict[str, Any]] = []
+        with self.connect() as conn:
+            for g in groups:
+                keeper_id = int(g["keeper_id"])
+                for row in g.get("rows") or []:
+                    rid = int(row["id"])
+                    if rid == keeper_id:
+                        continue
+                    conn.execute("DELETE FROM transactions WHERE id = ?", (rid,))
+                    deleted_ids.append(rid)
+                kept.append(
+                    {
+                        "keeper_id": keeper_id,
+                        "posted_date": g.get("posted_date"),
+                        "amount": g.get("amount"),
+                        "description": g.get("description"),
+                        "keeper_category": g.get("keeper_category"),
+                        "removed": int(g.get("extra_count") or 0),
+                    }
+                )
+        return {
+            "period_from": date_from,
+            "period_to": date_to,
+            "group_count": len(groups),
+            "deleted_count": len(deleted_ids),
+            "deleted_ids": deleted_ids,
+            "kept": kept,
+        }
+
     def leave_unlabeled(self, tx_id: int | None = None) -> list[dict[str, Any]]:
         """Park one or all queued transfers in «Переводы без разметки»."""
         if tx_id is not None:

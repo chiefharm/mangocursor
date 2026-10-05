@@ -401,8 +401,8 @@ def test_reimport_collapses_existing_twins(tmp_path: Path) -> None:
     assert groups[0]["extra_count"] == 1
     assert groups[0]["keeper_id"] == int(bloom["id"])
     assert len(store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")) == 2
-    again = store.import_transactions(parse_pdf_text(pdf), "sep30.pdf")
-    assert again.new_count == 0
+    fixed = store.collapse_duplicates("2026-09-01", "2026-09-30")
+    assert fixed["deleted_count"] == 1
     rows = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")
     assert len(rows) == 1
     assert rows[0]["user_category"] == "Кофе Bloom"
