@@ -237,52 +237,82 @@ def _score_existing_match(tx: ParsedTx, row: sqlite3.Row) -> int:
     return score
 
 
+def _keeper_rank(row: sqlite3.Row) -> tuple[int, int, int, int]:
+    """Prefer the row the user already sorted; then older id."""
+    has_user = 1 if (row["user_category"] or "").strip() else 0
+    has_note = 1 if (row["user_note"] or "").strip() else 0
+    out_of_queue = 0 if int(row["needs_review"] or 0) else 1
+    return (has_user, out_of_queue, has_note, -int(row["id"]))
+
+
+def _day_amount_candidates(
+    conn: sqlite3.Connection, tx: ParsedTx
+) -> list[sqlite3.Row]:
+    if tx_is_hold(tx):
+        return []
+    return list(
+        conn.execute(
+            """
+            SELECT * FROM transactions
+            WHERE posted_date = ?
+              AND abs(amount - ?) < 0.005
+              AND LOWER(COALESCE(status, '')) != 'hold'
+            """,
+            (tx.posted_date.isoformat(), tx.amount),
+        ).fetchall()
+    )
+
+
+def _fuzzy_candidates(conn: sqlite3.Connection, tx: ParsedTx) -> list[sqlite3.Row]:
+    candidates = _day_amount_candidates(conn, tx)
+    if not candidates:
+        return []
+    code = _extra_code(tx)
+    if code:
+        by_code = [row for row in candidates if _extra_code(row) == code]
+        if by_code:
+            return by_code
+        # Different Alfa operation codes on the same day/amount are distinct
+        # (two «Копилка» transfers etc.). Never merge across codes.
+        if any(_extra_code(row) for row in candidates):
+            return []
+    scored = [
+        (_score_existing_match(tx, row), row) for row in candidates
+    ]
+    scored = [(score, row) for score, row in scored if score > 0]
+    if not scored:
+        return []
+    best = max(score for score, _ in scored)
+    return [row for score, row in scored if score == best]
+
+
 def _lookup_existing(conn: sqlite3.Connection, tx: ParsedTx) -> sqlite3.Row | None:
+    found: dict[int, sqlite3.Row] = {}
     for legacy in (False, True):
         row = conn.execute(
             "SELECT * FROM transactions WHERE uid = ?", (tx_uid(tx, legacy=legacy),)
         ).fetchone()
         if row:
-            return row
-    # uid includes bank_category — after MCC remap the hash changes, but the
-    # bank line is the same. Match by day + amount + op code / merchant tokens
-    # so a wider re-upload refreshes the old row instead of creating a twin.
-    if tx_is_hold(tx):
+            found[int(row["id"])] = row
+    for row in _fuzzy_candidates(conn, tx):
+        found[int(row["id"])] = row
+    if not found:
         return None
-    candidates = conn.execute(
-        """
-        SELECT * FROM transactions
-        WHERE posted_date = ?
-          AND abs(amount - ?) < 0.005
-          AND LOWER(COALESCE(status, '')) != 'hold'
-        """,
-        (tx.posted_date.isoformat(), tx.amount),
-    ).fetchall()
-    if not candidates:
-        return None
-    code = _extra_code(tx)
-    if code:
-        by_code = [row for row in candidates if _extra_code(row) == code]
-        if len(by_code) == 1:
-            return by_code[0]
-        if by_code:
-            candidates = by_code
-        else:
-            # Different Alfa operation codes on the same day/amount are distinct
-            # (two «Копилка» transfers etc.). Never merge across codes.
-            if any(_extra_code(row) for row in candidates):
-                return None
-    scored = sorted(
-        ((_score_existing_match(tx, row), int(row["id"]), row) for row in candidates),
-        reverse=True,
-    )
-    best_score, _, best = scored[0]
-    if best_score <= 0:
-        return None
-    # Ambiguous if another row ties the best score.
-    if len(scored) > 1 and scored[1][0] == best_score:
-        return None
-    return best
+    return max(found.values(), key=_keeper_rank)
+
+
+def _purge_sibling_twins(
+    conn: sqlite3.Connection, tx: ParsedTx, keep_id: int
+) -> int:
+    """Drop leftover twins of the same bank line; keep the sorted one."""
+    twins = [
+        row
+        for row in _fuzzy_candidates(conn, tx)
+        if int(row["id"]) != int(keep_id)
+    ]
+    for row in twins:
+        conn.execute("DELETE FROM transactions WHERE id = ?", (row["id"],))
+    return len(twins)
 
 
 def _mcc_key(raw: str | None) -> str:
@@ -621,6 +651,7 @@ class FinanceStore:
                     _refresh_existing(
                         conn, existing, tx, uid, mcc_map=mcc_map, desc_map=desc_map
                     )
+                    _purge_sibling_twins(conn, tx, int(existing["id"]))
                     dup_count += 1
                     refreshed_count += 1
                     continue

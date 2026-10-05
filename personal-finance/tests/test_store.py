@@ -356,6 +356,55 @@ def test_reimport_matches_when_bank_category_changes(tmp_path: Path) -> None:
     assert int(rows[0]["needs_review"] or 0) == 0
 
 
+def test_reimport_collapses_existing_twins(tmp_path: Path) -> None:
+    """If a prior bad re-upload left twins, the next import keeps the sorted one."""
+    from app.parse_pdf import parse_pdf_text
+
+    pdf = """
+Выписка по счету
+Операции по счету
+Дата проводки Код операции Описание Сумма
+в валюте счета
+10.09.2026 CRD_A Операция по карте: 220015++++++2987, на сумму: 440.00 RUR, дата совершения
+операции: 09.09.26, место совершения операции: RU\\Krasnoyarsk\\BLOOM COFFEE MCC5814
+-440,00 RUR
+"""
+    store = _store(tmp_path)
+    store.import_transactions(parse_pdf_text(pdf), "sep29.pdf")
+    bloom = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")[0]
+    store.recategorize(int(bloom["id"]), user_category="Кофе Bloom", kind="expense")
+    # Simulate a twin created by an older re-import with a drifted uid.
+    with store.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO transactions (
+                uid, import_id, posted_at, posted_date, amount, currency,
+                bank_category, description, mcc, card, status, kind,
+                user_category, user_note, is_internal, needs_review, extra
+            ) VALUES (?, ?, ?, ?, ?, 'RUB', ?, ?, ?, ?, '', 'expense', '', '', 0, 1, ?)
+            """,
+            (
+                "twin-uid-drifted",
+                bloom["import_id"],
+                bloom["posted_at"],
+                bloom["posted_date"],
+                bloom["amount"],
+                "Кафе и рестораны",
+                bloom["description"],
+                bloom["mcc"],
+                bloom["card"],
+                bloom["extra"],
+            ),
+        )
+    assert len(store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")) == 2
+    again = store.import_transactions(parse_pdf_text(pdf), "sep30.pdf")
+    assert again.new_count == 0
+    rows = store.list_transactions(date_from="2026-09-01", date_to="2026-09-30")
+    assert len(rows) == 1
+    assert rows[0]["user_category"] == "Кофе Bloom"
+    assert int(rows[0]["needs_review"] or 0) == 0
+
+
 def test_reimport_clears_mcc_purchases_from_review_queue(tmp_path: Path) -> None:
     """Old imports left MCC purchases in the queue when the code table had a gap."""
     from app.parse_pdf import parse_pdf_text
