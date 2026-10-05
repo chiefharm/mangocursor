@@ -116,6 +116,29 @@ def test_alfa_pdf_uses_posting_dates_and_keeps_holds() -> None:
     assert unknown.needs_review is False
 
 
+def test_card2card_mcc_stays_in_review_queue() -> None:
+    text = """
+Выписка по счету
+Операции по счету
+Дата проводки Код операции Описание Сумма
+в валюте счета
+06.08.2026 CRD_C2C Операция по карте: 220015++++++2987, на сумму: 7500.00 RUR, дата совершения
+операции: 05.08.26, место совершения операции: RU\\MOSCOW\\CARD2CARD AMOBILE MCC6538
+-7 500,00 RUR
+10.08.2026 CRD_MS Операция по карте: 220015++++++2987, на сумму: 3000.00 RUR, дата совершения
+операции: 09.08.26, место совершения операции: RU\\MOSCOW\\MOSKVA MCC6538
+-3 000,00 RUR
+"""
+    txs = parse_pdf_text(text)
+    assert len(txs) == 2
+    for t in txs:
+        assert t.mcc == "6538"
+        assert t.category == "Переводы"
+        assert t.needs_review is True
+        assert t.suggested_kind == "transfer"
+        assert t.suggested_internal is False
+
+
 def test_alfa_header_totals_and_hold_merchant() -> None:
     from app.parse_pdf import extract_pdf_meta
 
