@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 from .drive import DriveFile, download_file, folder_id_from_env, list_folder
-from .parse import ParseError, parse_statement
+from .parse import ParseError, parse_statement_with_meta
 from .store import FinanceStore, ImportResult
 
 DEFAULT_FOLDER_URL = "https://drive.google.com/drive/folders/1VIxQOYkI8T5kGaO8EuzJEduuQBnLyRgj"
@@ -43,7 +43,7 @@ def pull_statements(
     for file in files:
         local = download_file(file, dest_dir)
         try:
-            txs = parse_statement(local, filename=file.name)
+            txs, meta = parse_statement_with_meta(local, filename=file.name)
         except ParseError as exc:
             reports.append(
                 {
@@ -59,8 +59,8 @@ def pull_statements(
             )
             continue
         dates = [tx.posted_date.isoformat() for tx in txs]
-        period_from = min(dates) if dates else None
-        period_to = max(dates) if dates else None
+        period_from = meta.period_from or (min(dates) if dates else None)
+        period_to = meta.period_to or (max(dates) if dates else None)
         if dry_run:
             review = sum(1 for tx in txs if tx.needs_review)
             reports.append(
@@ -78,13 +78,15 @@ def pull_statements(
             new_count += len(txs)
             review_count += review
         else:
-            result: ImportResult = store.import_transactions(txs, file.name)
+            result: ImportResult = store.import_transactions(txs, file.name, meta=meta)
             reports.append(_import_report(file, result))
             new_count += result.new_count
             dup_count += result.dup_count
             review_count += result.review_count
             period_from = result.period_from
             period_to = result.period_to
+            if result.reconcile:
+                reports[-1]["reconcile"] = result.reconcile
         if period_from:
             periods.append(period_from)
         if period_to:

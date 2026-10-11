@@ -7,8 +7,9 @@ from app.parse_pdf import parse_pdf_text
 ALFA = """
 Выписка по счету
 За период с 01.08.2026 по 28.08.2026
-Поступления 10 000,00 RUR
-Расходы 1 500,00 RUR
+Поступления 25 000,00 RUR
+Расходы 34 759,00 RUR
+Неподтвержденные операции 28 550,00 RUR
 Операции по счету
 Дата проводки Код операции Описание Сумма
 в валюте счета
@@ -33,10 +34,22 @@ PETERBU\\SBER 5411 SAMO MCC5411
 10 000,00 RUR
 HOLD Неподтвержденная операция: 1EE4HB TSUM ONLINE 25.08.26 28550.00 RUR, дата операции: 25.08.2026
 -28 550,00 RUR
+15.09.2026 CRD_EDU Операция по карте: 220015++++++2987, на сумму: 6890.00 RUR, дата совершения
+операции: 14.09.26, место совершения операции: RU\\MOSCOW\\Bloxy school MCC8299
+-6 890,00 RUR
+16.09.2026 CRD_PAD Операция по карте: 220015++++++7603, на сумму: 1500.00 RUR, дата совершения
+операции: 15.09.26, место совершения операции: RU\\MOSCOW\\OB PADEL PRIME OKT MCC7941
+-1 500,00 RUR
+17.09.2026 CRD_DIG Операция по карте: 220015++++++2987, на сумму: 60.01 RUR, дата совершения
+операции: 16.09.26, место совершения операции: RU\\MOSCOW\\Being Creative MCC5818
+-60,01 RUR
+18.09.2026 CRD_UNK Операция по карте: 220015++++++2987, на сумму: 420.00 RUR, дата совершения
+операции: 17.09.26, место совершения операции: RU\\MOSCOW\\SOME SHOP MCC7399
+-420,00 RUR
 """
 
 
-def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
+def test_alfa_pdf_uses_posting_dates_and_keeps_holds() -> None:
     txs = parse_pdf_text(ALFA, filename="random-name.pdf")
     assert [t.posted_date.isoformat() for t in txs] == [
         "2026-08-01",
@@ -44,8 +57,12 @@ def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
         "2026-08-01",
         "2026-08-04",
         "2026-08-07",
+        "2026-08-25",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
     ]
-    assert all(abs(t.amount) != 28550 for t in txs)
 
     piggy = next(t for t in txs if t.amount == -150)
     assert piggy.suggested_internal is True
@@ -67,3 +84,80 @@ def test_alfa_pdf_uses_posting_dates_and_skips_holds() -> None:
     assert ip.suggested_kind == "income"
     assert ip.category == "ИП"
     assert ip.needs_review is False
+
+    tsum = next(t for t in txs if abs(t.amount) == 28550)
+    assert tsum.amount == -28550
+    assert tsum.posted_date.isoformat() == "2026-08-25"
+    assert tsum.category == "Одежда"
+    assert tsum.description == "ЦУМ"
+    assert tsum.status == "hold"
+    assert tsum.extra.get("hold") is True
+    assert tsum.needs_review is False
+    assert tsum.suggested_kind == "expense"
+
+    school = next(t for t in txs if t.amount == -6890)
+    assert school.mcc == "8299"
+    assert school.category == "Образование"
+    assert school.needs_review is False
+
+    padel = next(t for t in txs if t.amount == -1500)
+    assert padel.mcc == "7941"
+    assert padel.category == "Спорт"
+    assert padel.needs_review is False
+
+    digital = next(t for t in txs if abs(t.amount - (-60.01)) < 0.001)
+    assert digital.mcc == "5818"
+    assert digital.category == "Подписки"
+    assert digital.needs_review is False
+
+    unknown = next(t for t in txs if t.amount == -420)
+    assert unknown.mcc == "7399"
+    assert unknown.category == "Прочее"
+    assert unknown.needs_review is False
+
+
+def test_card2card_mcc_stays_in_review_queue() -> None:
+    text = """
+Выписка по счету
+Операции по счету
+Дата проводки Код операции Описание Сумма
+в валюте счета
+06.08.2026 CRD_C2C Операция по карте: 220015++++++2987, на сумму: 7500.00 RUR, дата совершения
+операции: 05.08.26, место совершения операции: RU\\MOSCOW\\CARD2CARD AMOBILE MCC6538
+-7 500,00 RUR
+10.08.2026 CRD_MS Операция по карте: 220015++++++2987, на сумму: 3000.00 RUR, дата совершения
+операции: 09.08.26, место совершения операции: RU\\MOSCOW\\MOSKVA MCC6538
+-3 000,00 RUR
+"""
+    txs = parse_pdf_text(text)
+    assert len(txs) == 2
+    for t in txs:
+        assert t.mcc == "6538"
+        assert t.category == "Переводы"
+        assert t.needs_review is True
+        assert t.suggested_kind == "transfer"
+        assert t.suggested_internal is False
+
+
+def test_alfa_header_totals_and_hold_merchant() -> None:
+    from app.parse_pdf import extract_pdf_meta
+
+    meta = extract_pdf_meta(ALFA)
+    assert meta.from_header is True
+    assert meta.period_from == "2026-08-01"
+    assert meta.period_to == "2026-08-28"
+    assert meta.income == 25000
+    assert meta.expense == 34759
+    assert meta.unconfirmed == 28550
+
+    hold_line = (
+        "HOLD Неподтвержденная операция: 36A4FF 30653271 RU SBER 5411 SAMOKAT>SANKT "
+        "27.08.26 1043.00 RUR 220015++++++2987, дата операции: 27.08.2026\n"
+        "-1 043,00 RUR\n"
+    )
+    txs = parse_pdf_text(ALFA + hold_line, filename="hold.pdf")
+    samokat = next(t for t in txs if abs(t.amount) == 1043)
+    assert samokat.description == "Самокат"
+    assert samokat.category == "Супермаркеты"
+    assert samokat.card == "*2987"
+    assert samokat.status == "hold"
